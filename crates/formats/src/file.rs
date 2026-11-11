@@ -4,11 +4,30 @@ use crate::{FormatError, Result};
 /// Longest file name `safe_file_name` returns, in characters
 const MAX_NAME: usize = 100;
 
+/// Longest extension kept when a long name is cut
+const MAX_EXT: usize = 16;
+
+/// Cut a name over `MAX_NAME` characters in its stem, keeping the last `.ext`; a hash of the full name keeps two long names with one prefix apart
+fn shorten(name: String) -> String {
+    if name.chars().count() <= MAX_NAME {
+        return name;
+    }
+
+    let hash = name.bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x100000001b3));
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() && ext.chars().count() <= MAX_EXT => (stem, format!(".{ext}")),
+        _ => (name.as_str(), String::new()),
+    };
+    let keep = MAX_NAME - ext.chars().count() - 9;
+    format!("{}-{:08x}{ext}", stem.chars().take(keep).collect::<String>(), hash as u32)
+}
+
 pub fn safe_file_name(name: &str) -> String {
     let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
-    let cleaned: String = base.chars().map(|c| if c.is_alphanumeric() || "._- ".contains(c) { c } else { '_' }).take(MAX_NAME).collect();
+    let cleaned: String = base.chars().map(|c| if c.is_alphanumeric() || "._- ".contains(c) { c } else { '_' }).collect();
     // Windows drops trailing dots and spaces, so `CON.` would still open the device
     let cleaned = cleaned.trim_start_matches('.').trim_end_matches(['.', ' ']).to_string();
+    let cleaned = shorten(cleaned);
     if cleaned.is_empty() {
         return "resource".into();
     }

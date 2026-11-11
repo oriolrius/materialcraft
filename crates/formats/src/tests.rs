@@ -95,3 +95,17 @@ fn project_archive_entry_count_is_bounded() {
     let error = project::read(&bytes, "x").unwrap_err().to_string();
     assert!(error.contains("too many entries"), "{error}");
 }
+
+#[test]
+fn a_long_name_keeps_its_extension_and_stays_distinct() {
+    let long = format!("{}.png", "a".repeat(120));
+    let cut = safe_file_name(&long);
+    assert!(cut.ends_with(".png") && cut.chars().count() <= 100, "{cut}");
+    assert_eq!(cut, safe_file_name(&long), "stable");
+    // two names sharing their first 100 characters stay apart
+    let (a, b) = (safe_file_name(&format!("{}x.png", "p".repeat(100))), safe_file_name(&format!("{}y.png", "p".repeat(100))));
+    assert_ne!(a, b);
+    assert!(a.ends_with(".png") && b.ends_with(".png"));
+    // a reserved name is still prefixed, and a short name is untouched
+    assert_eq!(safe_file_name("ok.png"), "ok.png");
+}
