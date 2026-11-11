@@ -1,6 +1,7 @@
 //! The node library. Every SBS package in the library folder (`assets/sbs`, or the bundled copies)
 //! is loaded once per process and lends its graphs: function graphs go under Functions (sorted by
-//! their classification tags, with folder fallbacks), other graphs under their attribute category. Native nodes, function operations,
+//! their classification tags, with folder fallbacks), other graphs under the category their
+//! attributes name (`library_category`); graphs marked hidden stay out. Native nodes, function operations,
 //! FX-Map nodes and graph items fill the rest of the tree. A package whose titled frames are library
 //! categories ("Filters - Blurs") can also lay the library out: each node inside a frame becomes an
 //! entry in that category, listed as missing until a package provides it.
@@ -53,6 +54,55 @@ const SUB_KEYWORDS: &[(&str, &str, &[&str])] = &[
     ("PBR materials", "Tiles", &["tile"]),
     ("PBR materials", "Wood", &["wood", "plank", "bark"]),
     ("PBR materials", "Stone", &["stone", "rock", "marble", "granite"]),
+];
+
+/// Category names packages use in their attributes, and the library category they mean
+const PACKAGE_CATEGORIES: &[(&str, &str)] = &[
+    ("Generator", "Texture generators"),
+    ("Filter", "Filters"),
+    ("Material Filter", "Material filters"),
+    ("Material Filters", "Material filters"),
+    ("Mesh Adaptive", "Mesh-based generators"),
+    ("Splines & Paths", "Spline & Path tools"),
+    ("Material", "PBR materials"),
+    ("Scan", "Material filters/Scan processing"),
+    ("SDF function", "MCF functions"),
+    ("3D Function", "MCF functions"),
+    ("3D Functions", "MCF functions"),
+];
+
+/// Tags that name a sub-category in other words: (tag, sub-category)
+const TAG_SUB_CATEGORIES: &[(&str, &str)] = &[
+    ("Noise", "Noises"),
+    ("Pattern", "Patterns"),
+    ("Blur", "Blurs"),
+    ("Effect", "Effects"),
+    ("Transformation", "Transforms"),
+    ("Transform", "Transforms"),
+    ("Primitive", "Primitives"),
+    ("Operator", "Operators"),
+    ("Splines", "Spline tools"),
+    ("Paths", "Path tools"),
+];
+
+/// Tags that move a graph to another category whatever its own says: (tag, category)
+const TAG_CATEGORIES: &[(&str, &str)] = &[("Mesh Adaptive", "Mesh-based generators/Utilities")];
+
+/// Graphs whose attributes name no usable category: (graph identifier, category)
+const GRAPH_CATEGORIES: &[(&str, &str)] = &[
+    ("base_color_2_inputs", "Mesh-based generators/Utilities"),
+    ("base_color_4_inputs", "Mesh-based generators/Utilities"),
+    ("base_color_8_inputs", "Mesh-based generators/Utilities"),
+    ("clamp", "Filters/Adjustments"),
+    ("diffusion_uv", "Filters/Effects"),
+    ("fibonacci_sphere", "Functions/Maths"),
+    ("hemisphere", "Texture generators/Patterns"),
+    ("normal_color", "Texture generators/Patterns"),
+    ("quaternion_axis_angle", "Functions/Maths"),
+    ("quaternion_multiply", "Functions/Maths"),
+    ("quaternion_to_mat3", "Functions/Maths"),
+    ("spot_emboss", "Filters/Effects"),
+    ("vec3_rotate_by_quaternion", "Functions/Maths"),
 ];
 
 /// Everything loaded from the library folder
@@ -198,14 +248,16 @@ impl NodeLibrary {
         }
 
         for (path, package) in dependencies.iter().filter(|(path, _)| path.starts_with("sbs://")) {
+            // Loose functions beside material graphs are those graphs' helpers
+            let helpers_hidden = package.graphs.iter().any(|graph| graph.function.is_none());
             for graph in &package.graphs {
                 let name = graph.sbs_path();
-                if placed_graphs.contains(&(path.clone(), name.clone())) {
+                if graph.attributes.hide_in_library || placed_graphs.contains(&(path.clone(), name.clone())) {
                     continue;
                 }
 
                 if graph.function.is_some() {
-                    for category in function_categories(graph) {
+                    for category in function_categories(graph, helpers_hidden) {
                         let placement = LibraryPlacement { category, item: LayoutItem::FunctionInstance { package: path.clone(), graph: name.clone() } };
                         if let Some(entry) = resolve(&placement, dependencies) {
                             push(&mut out, entry);
@@ -215,7 +267,7 @@ impl NodeLibrary {
                 }
 
                 let placement = if graph.nodes.iter().any(|node| node.def == "output") {
-                    let category = known_category(&graph.attributes.category).unwrap_or_else(|| "Other".into());
+                    let category = library_category(graph).unwrap_or_else(|| "Other".into());
                     LibraryPlacement { category, item: LayoutItem::Instance { package: path.clone(), graph: name, outputs: Vec::new() } }
                 } else {
                     continue;
@@ -339,8 +391,36 @@ fn known_category(text: &str) -> Option<String> {
     Some(category_path(top, sub))
 }
 
-/// Function tags select filters; explicit category paths and package paths remain fallbacks.
-fn function_categories(graph: &materialcraft_core::Graph) -> Vec<String> {
+/// The library category a graph's attributes place it in: its category names the top level, in the
+/// tree's words or a package's, and its first matching tag the sub-category
+fn library_category(graph: &materialcraft_core::Graph) -> Option<String> {
+    let attributes = &graph.attributes;
+    let tags = || attributes.tags.split([',', ';']).map(str::trim).filter(|tag| !tag.is_empty());
+    let named = |table: &[(&str, &str)], text: &str| table.iter().find(|(name, _)| key(name) == key(text)).map(|(_, category)| (*category).to_string());
+
+    if let Some(category) = named(GRAPH_CATEGORIES, graph.sbs_path().rsplit('/').next().unwrap_or_default()) {
+        return Some(category);
+    }
+    if let Some(category) = tags().find_map(|tag| named(TAG_CATEGORIES, tag)) {
+        return Some(category);
+    }
+
+    let category = named(PACKAGE_CATEGORIES, &attributes.category).or_else(|| known_category(&attributes.category))?;
+    if category.contains('/') {
+        return Some(category);
+    }
+
+    let (top, subs) = CATEGORIES.iter().find(|(name, _)| *name == category)?;
+    let sub = tags().find_map(|tag| {
+        let tag = TAG_SUB_CATEGORIES.iter().find(|(name, _)| key(name) == key(tag)).map_or(tag, |(_, sub)| sub);
+        subs.iter().find(|sub| key(sub) == key(tag))
+    });
+    Some(sub.map_or_else(|| sub_category(top, &graph.sbs_path()), |sub| category_path(top, Some(sub))))
+}
+
+/// Function tags select filters; explicit category paths and package paths remain fallbacks. With
+/// `helpers_hidden`, a function that names no category outside the `Functions` folder is not listed
+fn function_categories(graph: &materialcraft_core::Graph, helpers_hidden: bool) -> Vec<String> {
     let subcategories = CATEGORIES.iter().find(|(name, _)| *name == "Functions").map_or(&[][..], |(_, subcategories)| *subcategories);
     let mut categories = Vec::new();
     for tag in graph.attributes.tags.split([',', ';']) {
@@ -354,7 +434,12 @@ fn function_categories(graph: &materialcraft_core::Graph) -> Vec<String> {
         }
     }
     if categories.is_empty() {
-        categories.push(known_category(&graph.attributes.category).unwrap_or_else(|| function_category(&graph.sbs_path())));
+        let path = graph.sbs_path();
+        match library_category(graph) {
+            Some(category) => categories.push(category),
+            None if helpers_hidden && !path.starts_with("Functions/") => {}
+            None => categories.push(function_category(&path)),
+        }
     }
     categories
 }

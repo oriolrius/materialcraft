@@ -12,6 +12,7 @@ pub(super) fn read(element: Node<'_, '_>) -> Attributes {
         author: text("author"),
         author_url: text("authorURL"),
         tags: text("tags"),
+        hide_in_library: child_value(element, "hideInLibrary") == Some("1"),
         group: text("group"),
         user_data: text("userdata"),
     }
@@ -33,6 +34,9 @@ pub(super) fn write(output: &mut String, graph: &Graph) {
         if !value.is_empty() {
             let _ = write!(output, "<{tag} v=\"{}\"/>", xml_escape(value));
         }
+    }
+    if attributes.hide_in_library {
+        output.push_str("<hideInLibrary v=\"1\"/>");
     }
     if graph.function.is_none() && graph.physical_size != [0.0; 3] {
         let [x, y, z] = graph.physical_size;

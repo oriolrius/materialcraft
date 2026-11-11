@@ -10,6 +10,8 @@ pub struct Attributes {
     pub author: String,
     pub author_url: String,
     pub tags: String,
+    /// A helper graph its package uses but the Library does not list
+    pub hide_in_library: bool,
     pub group: String,
     pub user_data: String,
 }

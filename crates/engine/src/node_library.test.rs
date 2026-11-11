@@ -39,6 +39,110 @@ fn frame_titles_map_to_library_categories() {
     assert_eq!(frame_category("Unknown", true, true), None);
 }
 
+/// A graph with these attributes, for category tests
+fn attributed(name: &str, category: &str, tags: &str) -> Graph {
+    let mut graph = Graph::new(name);
+    graph.attributes.category = category.into();
+    graph.attributes.tags = tags.into();
+    graph
+}
+
+/// Package categories and tags resolve to the tree's categories and sub-categories.
+#[test]
+fn package_attributes_map_to_library_categories() {
+    for (category, tags, expected) in [
+        ("Generator", "Noise, Perlin", "Texture generators/Noises"),
+        ("Generator", "Pattern", "Texture generators/Patterns"),
+        ("Filter", "Blur", "Filters/Blurs"),
+        ("Filter", "Effect, light, bloom", "Filters/Effects"),
+        ("Filter", "Normal Map", "Filters/Normal map"),
+        ("Filter", "Transformation, Crop", "Filters/Transforms"),
+        ("Filter", "", "Filters"),
+        ("Material Filter", "1-Click", "Material filters/1-click"),
+        ("Material Filter", "Scan Processing", "Material filters/Scan processing"),
+        ("Material Filters", "Mesh Adaptive", "Mesh-based generators/Utilities"),
+        ("Scan", "", "Material filters/Scan processing"),
+        ("Mesh Adaptive", "Mask Generators", "Mesh-based generators/Mask generators"),
+        ("Splines & Paths", "Splines, Paths", "Spline & Path tools/Spline tools"),
+        ("Splines & Paths", "Paths", "Spline & Path tools/Path tools"),
+        ("3D View", "HDRI Tools", "3D view/HDRI tools"),
+        ("Values", "Constant", "Values/Constant"),
+        ("PBR Materials/Paper ", "", "PBR materials/Paper"),
+        ("SDF function", "Primitive", "MCF functions/Primitives"),
+        ("3D Functions", "Material", "MCF functions"),
+    ] {
+        assert_eq!(library_category(&attributed("graph", category, tags)).as_deref(), Some(expected), "{category} / {tags}");
+    }
+
+    assert_eq!(library_category(&attributed("gravel", "Material", "")).as_deref(), Some("PBR materials/Ground"), "a material's name picks its sub-category");
+    assert_eq!(
+        library_category(&attributed("spot_emboss", "", "Effect")).as_deref(),
+        Some("Filters/Effects"),
+        "a graph without a category uses its listed one"
+    );
+    assert_eq!(library_category(&attributed("graph", "", "Effect")), None);
+    assert_eq!(library_category(&attributed("graph", "Template", "")), None);
+}
+
+/// Hidden graphs and helper functions stay out; categorized functions are listed.
+#[test]
+fn hidden_graphs_and_helper_functions_are_not_listed() {
+    let function = |name: &str, category: &str, tags: &str| {
+        let mut graph = attributed(name, category, tags);
+        graph.function = Some(materialcraft_core::FunctionGraph::default());
+        graph
+    };
+    let mut package = Package::new("Tools");
+    let mut shown = attributed("shown", "Filter", "Blur");
+    shown.add_node("output", [0.0; 2]);
+    let mut hidden = shown.clone();
+    hidden.name = "hidden".into();
+    hidden.attributes.hide_in_library = true;
+    package.graphs.extend([shown, hidden, function("helper", "", ""), function("cube", "SDF function", "Primitive"), function("hash", "", "Random")]);
+    let mut functions = Package::new("Functions only");
+    functions.graphs.push(function("loose", "", ""));
+    let packages = BTreeMap::from([("sbs://tools.sbs".to_string(), Arc::new(package)), ("sbs://user.sbs".to_string(), Arc::new(functions))]);
+
+    let entries = NodeLibrary::default().entries(&packages);
+
+    let listed: BTreeMap<_, _> =
+        entries.iter().filter(|entry| entry.id.starts_with("sbs://")).map(|entry| (entry.id.as_str(), entry.category.as_str())).collect();
+    let expected = [
+        ("sbs://tools.sbs#cube", "MCF functions/Primitives"),
+        ("sbs://tools.sbs#hash", "Functions/Random"),
+        ("sbs://tools.sbs#shown", "Filters/Blurs"),
+        ("sbs://user.sbs#loose", "Functions"),
+    ];
+    assert_eq!(listed, BTreeMap::from(expected), "a package of functions alone lists its loose ones");
+}
+
+/// Every graph the bundled packages list sits in a category of the tree.
+#[test]
+fn the_whole_bundled_library_is_categorized() {
+    let library = NodeLibrary::load(&library::files());
+    let entries = library.entries(&library.packages);
+    let packaged: Vec<_> = entries.iter().filter(|entry| entry.id.starts_with("sbs://")).collect();
+    let known = |category: &str| {
+        let mut parts = category.split('/');
+        let top = parts.next().unwrap_or_default();
+        CATEGORIES.iter().any(|(name, subs)| *name == top && parts.next().is_none_or(|sub| subs.contains(&sub)))
+    };
+
+    let unknown: Vec<_> = packaged.iter().filter(|entry| !known(&entry.category)).map(|entry| (&entry.id, &entry.category)).collect();
+    assert!(unknown.is_empty(), "{unknown:?}");
+    let category = |id: &str| packaged.iter().find(|entry| entry.id == id).map(|entry| entry.category.as_str());
+    for (id, expected) in [
+        ("sbs://noise_perlin_noise_v2.sbs#perlin_noise", "Texture generators/Noises"),
+        ("sbs://pattern_tile_sampler.sbs#tile_sampler", "Texture generators/Patterns"),
+        ("sbs://blur_hq.sbs#blur_hq", "Filters/Blurs"),
+        ("sbs://mg_mask_builder.sbs#mg_mask_builder_2", "Mesh-based generators/Mask generators"),
+        ("sbs://materials/pbr/gravel.sbs#gravel", "PBR materials/Ground"),
+        ("sbs://functions.sbs#Functions/Math/Pi", "Functions/Constant"),
+    ] {
+        assert_eq!(category(id), Some(expected), "{id}");
+    }
+}
+
 /// Identifier labels preserve recognized acronyms and omit empty words.
 #[test]
 fn identifiers_read_as_labels() {

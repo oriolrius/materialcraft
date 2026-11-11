@@ -115,8 +115,11 @@ in portable saves. The owning package's graphs are not recursively imported for 
 Every session loads the whole library folder once per process (`engine::node_library`, cached
 until `library.reload`). Each package joins every session's dependencies, so its graphs can be
 instanced, and the Library lists them: function graphs under Functions, sorted into its
-sub-categories by their folder (`Functions/Math/Pi` → Constant), other graphs under their attribute
-category. A package whose titled frames name Library categories ("Filters - Blurs") can also lay
+sub-categories by their folder (`Functions/Math/Pi` → Constant), other graphs under the category
+their attributes name: the category picks the top level (`Generator` → Texture generators, `Filter`
+→ Filters, `Mesh Adaptive` → Mesh-based generators…) and the first matching tag the sub-category
+(`Noise` → Noises, `Blur` → Blurs). Graphs marked `hideInLibrary`, and uncategorized functions
+beside material graphs, are helpers and stay out of the Library. A package whose titled frames name Library categories ("Filters - Blurs") can also lay
 the tree out (`formats::sbs::read_layout`): each node inside a frame becomes an entry there, listed
 as missing until a package in the folder provides it. Installed and browser builds embed all SBS
 packages and shared resources, compressed at build time. Library packages share a flat dependency
