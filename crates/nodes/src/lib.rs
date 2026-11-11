@@ -27,7 +27,7 @@ pub use image_input::{MAX_IMAGE_INPUTS, image_input_prefix};
 pub use node_definition::NodeDefinition;
 pub(crate) use node_definition_builder::node;
 pub use output_value_type::{output_port_value_type, output_value_type};
-pub use parameter::{clamp_params, resolve_params};
+pub use parameter::{accepts_scalar_function, clamp_params, resolve_params};
 pub use parameter_definition::ParameterDefinition;
 pub use parameter_descriptor::ParameterDescriptor;
 pub use port_definition::PortDefinition;

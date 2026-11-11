@@ -1,5 +1,7 @@
 //! Resolve the portable SBS library alias against the application's asset directory.
 
+include!(concat!(env!("OUT_DIR"), "/sbs_assets.rs"));
+
 /// Validate alias paths before joining a filesystem root. No package may escape the library.
 pub fn relative_path(uri: &str) -> Result<&str, String> {
     let path = uri.strip_prefix("sbs://").ok_or("not an SBS library alias")?;
@@ -63,6 +65,16 @@ pub fn root() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/sbs")
 }
 
+/// A canonical library location, including a new filename beneath an existing library folder.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn contains_file(path: &std::path::Path) -> bool {
+    let Ok(root) = root().canonicalize() else { return false };
+    if let Ok(file) = path.canonicalize() {
+        return file.starts_with(root);
+    }
+    path.parent().and_then(|parent| parent.canonicalize().ok()).is_some_and(|parent| parent.starts_with(root))
+}
+
 /// Read a validated library alias from the configured directory or the embedded fallback.
 pub fn read(uri: &str) -> Result<Vec<u8>, String> {
     let relative = relative_path(uri)?;
@@ -80,15 +92,24 @@ pub fn read(uri: &str) -> Result<Vec<u8>, String> {
         }
     }
 
-    // Installed and browser builds use the same bundled asset when no disk asset root exists
-    match relative {
-        "functions.sbs" => Ok(include_bytes!("../../../../assets/sbs/functions.sbs").to_vec()),
-        _ => Err(format!("Missing library asset {uri}")),
-    }
+    read_embedded(relative)
 }
 
-/// The packages bundled into the binary, for installs and the browser without an asset folder
-pub const BUNDLED: &[&str] = &["sbs://functions.sbs"];
+/// Compressed assets keep installed and browser builds independent of the source checkout.
+fn read_embedded(relative: &str) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let index = EMBEDDED_ASSETS.binary_search_by_key(&relative, |(name, _, _)| *name).map_err(|_| format!("Missing library asset sbs://{relative}"))?;
+    let (_, compressed, size) = EMBEDDED_ASSETS.get(index).ok_or("invalid bundled asset index")?;
+    if *size > 256 << 20 {
+        return Err("bundled asset exceeds 256 MiB".into());
+    }
+    let mut bytes = Vec::new();
+    flate2::read::DeflateDecoder::new(*compressed).take(*size as u64 + 1).read_to_end(&mut bytes).map_err(|error| error.to_string())?;
+    if bytes.len() != *size {
+        return Err("bundled asset has an invalid decompressed length".into());
+    }
+    Ok(bytes)
+}
 
 /// Bounds for scanning the library folder: how deep, and how many packages
 const MAX_DEPTH: usize = 6;
@@ -138,6 +159,16 @@ fn scan(directory: &std::path::Path, prefix: &str, depth: usize, found: &mut Vec
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    /// The shipped fallback preserves the exact generated SBS and resource bytes.
+    #[test]
+    fn embedded_library_contains_every_disk_asset() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/sbs");
+        for (relative, _, _) in EMBEDDED_ASSETS {
+            assert_eq!(read_embedded(relative).unwrap(), std::fs::read(root.join(relative)).unwrap(), "{relative}");
+        }
+        assert!(read_embedded("resources/DoorFrame.svg").unwrap().starts_with(b"<svg"));
+    }
 
     /// Discovered packages have unique valid aliases and the embedded fallback is present.
     #[test]

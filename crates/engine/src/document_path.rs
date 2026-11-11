@@ -49,6 +49,13 @@ pub(crate) fn resolve(owner: &str, reference: &str) -> String {
 }
 
 pub(crate) fn relative(owner: &str, source: &str) -> String {
+    #[cfg(not(target_arch = "wasm32"))]
+    if source.starts_with("sbs://")
+        && materialcraft_formats::sbs::library::contains_file(std::path::Path::new(owner))
+        && let Ok(relative) = materialcraft_formats::sbs::library::relative_path(source)
+    {
+        return self::relative(&normalize(owner), &materialcraft_formats::sbs::library::root().join(relative).to_string_lossy());
+    }
     if source.contains("://") {
         return source.to_string();
     }

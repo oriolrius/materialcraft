@@ -92,7 +92,7 @@ pub(crate) fn evaluate(
             } else {
                 resolved.size
             };
-            let value = crate::parameter_function::evaluate(function, parameter.value_type(), &variables, resolved.seed, size)
+            let value = crate::parameter_function::evaluate(function, parameter.value_type(), &variables, resolved.seed, size, false)
                 .map_err(|error| format!("function of `{}`: {error}", parameter.identifier()))?;
             parameter.set_value(&mut evaluated, &value)?;
             parameter.set_inheritance(&mut evaluated, parameter.inheritance(base));

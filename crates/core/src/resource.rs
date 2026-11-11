@@ -10,7 +10,7 @@ pub struct Resource {
     pub folder: String,
     /// File name inside the package's `resources/` folder
     pub file: String,
-    /// Unavailable external asset retained for repair on a later load
+    /// External origin retained for linked library saves and repair when bytes are unavailable
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub source: String,
     /// Original bytes, saved beside native SBS or inside a MaterialCraft archive.

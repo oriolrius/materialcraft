@@ -7,6 +7,9 @@ pub const PACKAGE_EXT: &str = "sbs";
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Package {
     pub name: String,
+    /// Baseline version read from SBS. Unversioned packages use the current release on first write.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format_version: Option<String>,
     pub graphs: Vec<Graph>,
     /// Explicit SBS group paths, including folders without graphs
     #[serde(default)]
@@ -32,6 +35,7 @@ impl Package {
     pub fn new(name: &str) -> Package {
         Package {
             name: name.into(),
+            format_version: None,
             graphs: Vec::new(),
             folders: Vec::new(),
             folder_descriptions: Default::default(),

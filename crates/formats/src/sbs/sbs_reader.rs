@@ -26,6 +26,7 @@ pub(super) struct SbsReader<'text, 'warnings> {
     pub(super) dependencies: HashMap<String, String>,
     pub(super) graph_names: HashMap<String, String>,
     pub(super) resource_names: HashMap<String, String>,
+    pub(super) external_resource_names: HashMap<(String, String), String>,
     pub(super) node_count: usize,
 }
 
@@ -68,7 +69,10 @@ impl<'text> SbsReader<'text, '_> {
                             pending.push((path, group_content));
                         }
                     }
-                    "resource" => self.read_resource(item, &identifier, &path, pkg, linked),
+                    "resource" => {
+                        let name = self.read_resource(item, &identifier, &path, pkg, linked);
+                        self.resource_names.insert(path, name);
+                    }
                     "mdl_graph" | "mdlGraph" => self.warnings.add(format!("MDL graph `{path}` is not supported")),
                     other => self.warnings.add(format!("package item <{other}> `{path}` is not supported")),
                 }
@@ -76,7 +80,7 @@ impl<'text> SbsReader<'text, '_> {
         }
     }
 
-    pub(super) fn read_resource(&mut self, item: XmlNode, identifier: &str, path: &str, pkg: &mut Package, linked: &dyn Fn(&str) -> Option<Vec<u8>>) {
+    pub(super) fn read_resource(&mut self, item: XmlNode, identifier: &str, path: &str, pkg: &mut Package, linked: &dyn Fn(&str) -> Option<Vec<u8>>) -> String {
         let kind = child_value(item, "type").unwrap_or("bitmap");
         let format = child_value(item, "format").unwrap_or("png").trim().to_ascii_lowercase();
         let source = child_element(item, "source");
@@ -86,6 +90,7 @@ impl<'text> SbsReader<'text, '_> {
             .filter(|path| !path.is_empty())
             .or_else(|| child_value(item, "filepath"));
         let mut bytes: Option<Vec<u8>> = None;
+        let mut loaded_source = "";
         let mut why_missing = String::new();
 
         if let Some(embedded) = source.and_then(|s| child_element(s, "binembedded")) {
@@ -106,6 +111,7 @@ impl<'text> SbsReader<'text, '_> {
                 match linked(file) {
                     Some(data) => {
                         bytes = Some(data);
+                        loaded_source = file;
                         break;
                     }
                     None => why_missing = format!("its file `{file}` was not found next to the package"),
@@ -115,12 +121,13 @@ impl<'text> SbsReader<'text, '_> {
 
         let taken: Vec<String> = pkg.resources.iter().map(|r| r.name.clone()).collect();
         let name = unique_name(&taken, if identifier.is_empty() { "resource" } else { identifier });
-        self.resource_names.insert(path.to_string(), name.clone());
         match bytes {
             Some(data) => {
                 let ext = if kind == "svg" { "svg".to_string() } else { format };
 
                 let mut resource = Resource::new(name.clone(), crate::safe_file_name(&format!("{name}.{ext}")), ResourceBytes::new(data));
+                // Keep the link as well as the loaded bytes so library saves can retain shared assets.
+                resource.source = loaded_source.into();
                 resource.folder = path.rsplit_once('/').map_or("", |(folder, _)| folder).into();
                 pkg.resources.push(resource);
             }
@@ -134,6 +141,7 @@ impl<'text> SbsReader<'text, '_> {
                 self.warnings.add(format!("resource `{path}` could not be loaded: {why}"));
             }
         }
+        name
     }
 
     pub(super) fn resolve_reference(&self, url: &str) -> (String, Option<String>) {
@@ -549,6 +557,13 @@ impl<'text> SbsReader<'text, '_> {
             params.into_iter().flat_map(|p| children_named(p, "parameter")).filter(|p| !BASE_PARAMS.contains(&child_value(*p, "name").unwrap_or(""))).collect();
         for param in &filter_params {
             let param_name = child_value(*param, "name").unwrap_or("");
+            // Read the earlier writer's alias without emitting it alongside the native parameter.
+            let param_name = match (filter.sbs, param_name) {
+                ("hsl", "luminance") => "luminosity",
+                ("dyngradient", "position") => "coordinate",
+                ("dyngradient", "orientation") => "uvselector",
+                _ => param_name,
+            };
             let value = child_element(*param, "paramValue").and_then(sbs_constant);
 
             if let Some(&(_, mc_name)) = filter.params.iter().find(|(sbs, _)| *sbs == param_name) {
@@ -560,8 +575,17 @@ impl<'text> SbsReader<'text, '_> {
 
             match (filter.sbs, param_name, value) {
                 ("bitmap", "bitmapresourcepath", Some(SbsValue::Text(url))) | ("svg", "vectorresourcepath", Some(SbsValue::Text(url))) => {
-                    let (path, _) = self.resolve_reference(&url);
-                    match self.resource_names.get(&path) {
+                    let dependency_uid = url.split_once('?').and_then(|(_, query)| query.split('&').find_map(|part| part.strip_prefix("dependency=")));
+                    if let Some(uid) = dependency_uid.filter(|uid| !self.dependencies.contains_key(*uid)) {
+                        self.warnings.add(format!("graph `{graph_name}`: resource reference has unknown dependency `{uid}`"));
+                        continue;
+                    }
+                    let (path, dependency) = self.resolve_reference(&url);
+                    let name = match dependency.filter(|file| file != SELF_DEPENDENCY) {
+                        Some(file) => self.external_resource_names.get(&(file, path.clone())),
+                        None => self.resource_names.get(&path),
+                    };
+                    match name {
                         Some(name) => {
                             node.params.insert("resource".into(), Value::Text(name.clone()));
                         }

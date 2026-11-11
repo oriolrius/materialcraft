@@ -85,7 +85,11 @@ impl NodeLibrary {
     /// Load `files` (`sbs://` paths)
     pub fn load(files: &[String]) -> NodeLibrary {
         let mut out = NodeLibrary::default();
+        let mut seen = BTreeSet::new();
         for uri in files {
+            if !seen.insert(uri) {
+                continue;
+            }
             let bytes = match library::read(uri) {
                 Ok(bytes) => bytes,
                 Err(error) => {
@@ -111,16 +115,17 @@ impl NodeLibrary {
             match materialcraft_formats::sbs::read_sbs(&bytes, uri, &crate::file_cmds::linked_files(uri)) {
                 Ok(mut read) => {
                     crate::linked_files::normalize_references(&mut read.pkg, uri);
-                    read.warnings.extend(crate::linked_files::load(&mut read.pkg));
                     out.warnings.extend(read.warnings);
-                    for (path, package) in std::mem::take(&mut read.pkg.dependencies) {
-                        out.packages.entry(path).or_insert(package);
-                    }
                     out.packages.insert(uri.clone(), Arc::new(read.pkg));
                 }
                 Err(error) => out.warnings.push(format!("Library package {uri}: {error}")),
             }
         }
+        let mut registry = Package::new("Library");
+        registry.dependencies = std::mem::take(&mut out.packages);
+        let pending = registry.dependencies.keys().cloned().collect();
+        out.warnings.extend(crate::linked_files::load_references(&mut registry, pending));
+        out.packages = registry.dependencies;
         out
     }
 

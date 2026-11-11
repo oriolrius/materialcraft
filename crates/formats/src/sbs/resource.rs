@@ -4,7 +4,14 @@ use materialcraft_core::Resource;
 use std::fmt::Write;
 
 pub(super) fn write(content: &mut String, resource: &Resource, writer: &mut SbsWriter) -> Result<()> {
-    let svg = resource.file.to_ascii_lowercase().ends_with(".svg");
+    let file = resource.file.to_ascii_lowercase();
+    let kind = if file.ends_with(".svg") {
+        "svg"
+    } else if file.ends_with(".ttf") || file.ends_with(".otf") {
+        "font"
+    } else {
+        "bitmap"
+    };
     let ext = resource.file.rsplit_once('.').map_or("png", |(_, e)| e);
     let source = if !resource.source.is_empty() && resource.bytes.is_empty() {
         format!("<externalcopy><filename v=\"{}\"/></externalcopy>", xml_escape(&resource.source))
@@ -16,7 +23,7 @@ pub(super) fn write(content: &mut String, resource: &Resource, writer: &mut SbsW
         "<resource><identifier v=\"{}\"/><uid v=\"{}\"/><type v=\"{}\"/><format v=\"{}\"/><filepath v=\"\"/><source>{source}</source></resource>",
         xml_escape(&resource.name),
         writer.next_uid(),
-        if svg { "svg" } else { "bitmap" },
+        kind,
         xml_escape(ext)
     );
 

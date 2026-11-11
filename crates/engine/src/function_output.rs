@@ -43,7 +43,13 @@ pub fn validate(document: &Graph, target: &FunctionGraphTarget, function: &Funct
 
     let types = materialcraft_nodes::function::node_types(function)?;
     let actual = types.get(&id).copied().and_then(ValueType::from_code).ok_or("output node has an unknown value type")?;
-    if actual != expected {
+    let scalar_channel = match target {
+        FunctionGraphTarget::Dynamic { node, parameter } => {
+            document.node(*node).is_ok_and(|node| materialcraft_nodes::accepts_scalar_function(&node.def, parameter))
+        }
+        _ => false,
+    };
+    if actual != expected && !(scalar_channel && expected == ValueType::Float4 && actual == ValueType::Float) {
         return Err(format!("Output node returns {}; expected {}", actual.label(), expected.label()));
     }
     Ok(())

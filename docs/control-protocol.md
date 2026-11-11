@@ -23,8 +23,9 @@ Agents drive MaterialCraft three ways, all dispatching the same engine commands:
    engine-command authority, including host file access.
    Set `MATERIALCRAFT_NO_PREFS=1` for scripted runs so the user's layout is left alone.
 
-Every SBS save writes MaterialCraft's workspace release version to `updaterVersion`, including
-when resaving a file from an older release. `formatVersion` identifies the SBS schema separately.
+The first SBS save sets `formatVersion` and `updaterVersion` to MaterialCraft's workspace release
+version. Later saves preserve the document's original `formatVersion` and refresh `updaterVersion`
+to the saving application's release version. Save As and archive packaging retain that baseline too.
 
 ## Methods
 
@@ -126,7 +127,7 @@ Types: `move`, `down`, `up`, `click`, `doubleClick`, `drag`, `scroll`, `key` (eg
 ## Node library
 
 Every `.sbs` file in the library folder (`assets/sbs`, or `MATERIALCRAFT_SBS_DIR`; installed and
-browser builds use the bundled `functions.sbs`) loads once per process, and its graphs join every
+browser builds embed all library packages and shared resources) loads once per process, and its graphs join every
 session's dependencies. Function graphs are listed under Functions using recognized Tags, then
 Category or package-path fallbacks (`Functions/colorValues` → Color, `Functions/easings` → Easings).
 Other graphs use the category in their attributes. A package whose graphs group nodes in titled frames lays the library

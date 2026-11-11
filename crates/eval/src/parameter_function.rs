@@ -2,9 +2,17 @@ use materialcraft_core::{FunctionGraph, Value, ValueType};
 use materialcraft_nodes::function::{EvaluationContext, EvaluationState, compile};
 use std::collections::BTreeMap;
 
-pub(crate) fn evaluate(function: &FunctionGraph, expected: ValueType, variables: &BTreeMap<String, Value>, seed: u32, size: [u32; 2]) -> Result<Value, String> {
+pub(crate) fn evaluate(
+    function: &FunctionGraph,
+    expected: ValueType,
+    variables: &BTreeMap<String, Value>,
+    seed: u32,
+    size: [u32; 2],
+    allow_scalar: bool,
+) -> Result<Value, String> {
     let program = compile(function, seed)?;
-    if program.output_type() != expected as u32 {
+    let scalar_channel = allow_scalar && expected == ValueType::Float4 && program.output_type() == ValueType::Float as u32;
+    if program.output_type() != expected as u32 && !scalar_channel {
         return Err(format!("output must be {}", expected.label()));
     }
 

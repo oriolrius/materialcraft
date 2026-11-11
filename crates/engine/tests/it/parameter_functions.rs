@@ -302,6 +302,37 @@ fn color_boolean_enum_and_text_parameters_use_typed_function_outputs() {
 }
 
 #[test]
+fn native_channel_parameters_accept_scalar_functions_without_changing_their_bodies() {
+    let mut session = new_session();
+    session.preview_size = Some(16);
+    for (definition, parameters) in [("levels", &["in_low", "in_mid", "in_high", "out_low", "out_high"][..]), ("fx_map", &["background"][..])] {
+        for parameter in parameters {
+            let owner = node(&mut session, definition);
+            let function = FunctionGraph::constant(Value::Float(0.25));
+            command(&mut session, "graph.node.function", json!({"id": owner, "param": parameter, "function": function}));
+            let target = materialcraft_engine::FunctionGraphTarget::Dynamic { node: owner, parameter: (*parameter).into() };
+            assert!(materialcraft_engine::function_inspection::warnings_for(session.graph().unwrap(), &target, &function).is_empty());
+            let result = &session.cook().nodes[&owner];
+            assert_eq!(result.error, None, "{definition}.{parameter}");
+            let expected = if definition == "fx_map" { Value::Color([0.25, 0.25, 0.25, 1.0]) } else { Value::Float4([0.25; 4]) };
+            assert_eq!(result.parameters[*parameter], expected);
+
+            let bytes = formats::sbs::write_sbs(&session.pkg).unwrap();
+            let loaded = formats::sbs::read_sbs(&bytes, "scalar-channel.sbs", &|_| None).unwrap();
+            assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+            let reopened_node = loaded.pkg.graphs[0].nodes.last().unwrap();
+            let reopened_id = reopened_node.id;
+            let saved_function = &reopened_node.functions[*parameter];
+            assert_eq!(saved_function.nodes.len(), 1);
+            assert_eq!(saved_function.nodes[0].value, Some(Value::Float(0.25)));
+            let mut reopened = Session::new(loaded.pkg);
+            reopened.preview_size = Some(16);
+            assert_eq!(reopened.cook().nodes[&reopened_id].parameters[*parameter], expected);
+        }
+    }
+}
+
+#[test]
 fn base_functions_inherit_from_the_primary_input_and_bypasses_keep_input_dimensions() {
     let mut session = new_session();
     session.preview_size = Some(16);

@@ -161,9 +161,11 @@ fn bundled_library_has_complete_bodies_and_current_export_metadata() {
     let bytes = include_bytes!("../../../assets/sbs/functions.sbs");
     let read = read_sbs(bytes, "functions.sbs", &|_| None).unwrap();
     let xml = roxmltree::Document::parse(std::str::from_utf8(bytes).unwrap()).unwrap();
-    let version = xml.descendants().find(|element| element.has_tag_name("updaterVersion")).unwrap().attribute("v").unwrap();
-
-    assert_eq!(version, env!("CARGO_PKG_VERSION"));
+    // The baseline is the release that first saved this asset; future saves keep it.
+    for (field, expected) in [("formatVersion", "0.1.3"), ("updaterVersion", env!("CARGO_PKG_VERSION"))] {
+        let version = xml.root_element().children().find(|element| element.has_tag_name(field)).unwrap().attribute("v").unwrap();
+        assert_eq!(version, expected, "bundled functions {field}");
+    }
     assert!(read.warnings.is_empty(), "{:?}", read.warnings);
     assert_eq!(read.pkg.graphs.len(), 171);
     assert_eq!(read.pkg.graphs.iter().flat_map(|graph| graph.functions()).map(|function| function.nodes.len()).sum::<usize>(), 2334);

@@ -7,12 +7,14 @@ use materialcraft_engine::{
 use serde_json::json;
 use std::collections::BTreeMap;
 
+use super::node_library::fixture;
+
 fn session() -> Session {
     let mut package = Package::new("Library integration");
     let mut graph = Graph::new("Caller");
     graph.function = Some(FunctionGraph::default());
     package.graphs.push(graph);
-    Session::new(package)
+    Session::with_library(package, fixture::library())
 }
 
 fn value(function: &FunctionGraph) -> Value {
@@ -48,7 +50,7 @@ fn library_instances_are_discoverable_undoable_and_portable() {
 }
 
 #[test]
-fn every_bundled_function_has_a_resolved_executable_body() {
+fn every_standard_function_has_a_resolved_executable_body() {
     let mut session = session();
     let entries = execute(&mut session, "library.functions", &json!({})).unwrap();
     let entries = entries.as_array().unwrap();

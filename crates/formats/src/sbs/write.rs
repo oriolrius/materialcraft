@@ -1,5 +1,5 @@
 use super::{
-    constant::{FIRST_UID, FORMAT_VERSION, SELF_DEPENDENCY, UPDATER_VERSION},
+    constant::{FIRST_UID, SELF_DEPENDENCY, UPDATER_VERSION},
     sbs_writer::SbsWriter,
     xml::xml_escape,
 };
@@ -8,6 +8,7 @@ use materialcraft_core::Package;
 use std::{collections::BTreeMap, fmt::Write as _};
 
 pub fn write_sbs(pkg: &Package) -> Result<Vec<u8>> {
+    let format_version = pkg.format_version.as_deref().filter(|version| !version.trim().is_empty()).unwrap_or(UPDATER_VERSION);
     let mut writer = SbsWriter { last_uid: FIRST_UID, external_packages: BTreeMap::new() };
     let self_uid = writer.next_uid();
 
@@ -18,8 +19,9 @@ pub fn write_sbs(pkg: &Package) -> Result<Vec<u8>> {
     let mut out = String::with_capacity(content.len() + 4096);
     let _ = write!(
         out,
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><package><identifier v=\"{}\"/><formatVersion v=\"{FORMAT_VERSION}\"/><updaterVersion v=\"{UPDATER_VERSION}\"/><fileUID v=\"0\"/><versionUID v=\"0\"/><dependencies>",
-        xml_escape(&pkg.name)
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><package><identifier v=\"{}\"/><formatVersion v=\"{}\"/><updaterVersion v=\"{UPDATER_VERSION}\"/><fileUID v=\"0\"/><versionUID v=\"0\"/><dependencies>",
+        xml_escape(&pkg.name),
+        xml_escape(format_version)
     );
     let write_dependency = |out: &mut String, file: &str, uid: u64| {
         let _ = write!(

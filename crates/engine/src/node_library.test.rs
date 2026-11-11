@@ -4,6 +4,22 @@ use materialcraft_core::Graph;
 #[path = "../tests/support/node_library.rs"]
 mod fixture;
 
+/// Installing a library must not compile and clone graphs that no open document references.
+#[test]
+fn unused_library_packages_remain_shared_without_interface_refresh() {
+    let mut package = Package::new("Unused library");
+    package.graphs.push(Graph::new("Source"));
+    let mut caller = Graph::new("Caller");
+    let id = caller.add_node("graph_instance", [0.0; 2]);
+    caller.nodes.iter_mut().find(|node| node.id == id).unwrap().params.insert("graph".into(), materialcraft_core::Value::Text("Source".into()));
+    package.graphs.push(caller);
+    let source = Arc::new(package);
+    let mut library = NodeLibrary::default();
+    library.packages.insert("sbs://unused.sbs".into(), source.clone());
+    let session = crate::Session::with_library(Package::new("Empty"), Arc::new(library));
+    assert!(Arc::ptr_eq(&source, &session.pkg.dependencies["sbs://unused.sbs"]));
+}
+
 /// Category aliases and frame kinds resolve only to recognized categories.
 #[test]
 fn frame_titles_map_to_library_categories() {

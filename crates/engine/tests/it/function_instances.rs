@@ -54,6 +54,50 @@ fn evaluate(graph: &FunctionGraph) -> Value {
 }
 
 #[test]
+fn function_expansion_allows_several_bounded_bodies_but_still_caps_total_work() {
+    let mut body = FunctionGraph::constant(Value::Float(1.0));
+    let mut output = body.output.unwrap();
+    for _ in 0..2099 {
+        output = body.add("abs", &[output], None);
+    }
+    body.output = Some(output);
+    let mut source = Graph::new("Body");
+    source.function = Some(body);
+    let mut package = Package::new("Expansion");
+    package.graphs.push(source);
+    let caller = |count: usize| {
+        let mut graph = FunctionGraph::default();
+        let mut output = None;
+        for _ in 0..count {
+            let id = graph.add("instance", &[], None);
+            graph.nodes.iter_mut().find(|node| node.id == id).unwrap().instance = Some(GraphInstance {
+                label: String::new(),
+                package: String::new(),
+                graph: "Body".into(),
+                inputs: Vec::new(),
+                outputs: Vec::new(),
+                defaults: BTreeMap::new(),
+            });
+            output = Some(output.map_or(id, |previous| graph.add("add", &[previous, id], None)));
+        }
+        graph.output = output;
+        graph
+    };
+    let mut allowed = caller(3);
+    function::resolve_instances(&mut allowed, &package, &BTreeMap::new());
+    assert_eq!(evaluate(&allowed), Value::Float(3.0));
+    let mut oversized = caller(4);
+    function::resolve_instances(&mut oversized, &package, &BTreeMap::new());
+    assert!(function::compile(&oversized, 0).err().unwrap().contains("limit"));
+    // Compiling a pre-resolved tree must enforce its own budget too.
+    let source = allowed.nodes.iter().find_map(|node| node.source.clone()).unwrap();
+    for node in oversized.nodes.iter_mut().filter(|node| node.instance.is_some()) {
+        node.source = Some(source.clone());
+    }
+    assert!(function::compile(&oversized, 0).err().unwrap().contains("limit"));
+}
+
+#[test]
 fn redundant_legacy_function_connectors_preserve_wires_without_repeating_evaluation() {
     let mut package = source();
     let mut graph = Graph::new("Caller");

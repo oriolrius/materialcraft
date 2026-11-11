@@ -6,7 +6,23 @@ use materialcraft_engine::{
 use serde_json::{Value, json};
 
 #[path = "../support/node_library.rs"]
-mod fixture;
+pub(super) mod fixture;
+
+#[test]
+fn bundled_brick_material_cooks_without_missing_functions_or_budget_errors() {
+    let mut session = materialcraft_engine::new_session();
+    session.preview_size = Some(64);
+    materialcraft_engine::file_cmds::open_file(&mut session, "sbs://materials/pbr/bricks_001.sbs").unwrap();
+    let outputs: Vec<_> = session.graph().unwrap().nodes.iter().filter(|node| node.def == "output").map(|node| node.id).collect();
+    assert!(!outputs.is_empty());
+    let cooked = session.cook();
+    let failures: Vec<_> = cooked.nodes.iter().filter_map(|(id, result)| result.error.as_ref().map(|error| (*id, error))).collect();
+    assert!(failures.is_empty(), "{failures:?}");
+    for output in outputs {
+        let image = cooked.image(output, 0).unwrap();
+        assert!(image.data.iter().all(|value| value.is_finite()));
+    }
+}
 
 /// Return the catalog entries exposed by the library command.
 fn entries(session: &mut Session, parameters: Value) -> Vec<Value> {

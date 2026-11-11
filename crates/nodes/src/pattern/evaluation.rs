@@ -5,7 +5,9 @@ use super::{catalog, pattern_stamp::PatternStamp, pattern_visit::PatternVisit, r
 use crate::function::{EvaluationContext, EvaluationState, compile};
 use crate::{CookContext, CookResult};
 
-const MAX_VISITS: usize = 65_536;
+// A 512-by-512 quadtree needs 349,525 visits including its internal quadrants.
+// Keep a hard ceiling for deeper or repeated trees; the rasterizer separately bounds pixel work.
+const MAX_VISITS: usize = 1_048_576;
 
 pub(crate) fn cook(context: &CookContext) -> CookResult {
     let Some(Value::PatternGraph(graph)) = context.params.get("pattern") else {
@@ -102,6 +104,7 @@ pub(crate) fn cook(context: &CookContext) -> CookResult {
                         size: vector("patternsize").map(|size| size * visit.extent),
                         rotation: scalar("patternrotation"),
                         color,
+                        depth: visit.depth,
                         pattern,
                         variation: scalar("patternsuppl"),
                         blend: integer("blendingmode"),

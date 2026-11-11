@@ -14,6 +14,7 @@ pub(super) fn render(context: &CookContext, stamps: &[PatternStamp]) -> Result<I
     image = if kind == Kind::Gray { image.to_gray() } else { image.to_color() };
     let channels = kind.channels();
     let opacity = context.f("opacity").max(0.0);
+    let roughness = context.f("roughness");
     let pixels = Arc::make_mut(&mut image.data);
     let mut budget = MAX_SAMPLES;
 
@@ -29,6 +30,13 @@ pub(super) fn render(context: &CookContext, stamps: &[PatternStamp]) -> Result<I
         }
         if !(2..=18).contains(&stamp.pattern) && !(256..256 + crate::MAX_IMAGE_INPUTS as i32).contains(&stamp.pattern) {
             return Err(format!("unsupported pattern {}", stamp.pattern));
+        }
+
+        // Hurst octave attenuation: subdivisions halve scale, so amplitude falls by 2^(-H).
+        // Only Quadrant subdivision adds depth; repetition and routing do not.
+        let opacity = opacity * (-roughness * stamp.depth as f32).exp2();
+        if !opacity.is_finite() {
+            return Err("pattern roughness overflowed its depth opacity".into());
         }
 
         let (sine, cosine) = (stamp.rotation * std::f32::consts::TAU).sin_cos();

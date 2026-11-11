@@ -44,7 +44,7 @@ pub(super) const FILTERS: &[FilterMap] = &[
         sbs: "dyngradient",
         def: "gradient_dynamic",
         inputs: &[("input1", "input"), ("input2", "gradient"), ("inputgradient", "gradient")],
-        params: &[("position", "position"), ("orientation", "orientation")],
+        params: &[("coordinate", "position"), ("uvselector", "orientation")],
     },
     FilterMap { sbs: "gradient", def: "gradient_map", inputs: &[("input1", "input")], params: &[("colorswitch", "color_mode")] },
     FilterMap {
@@ -53,7 +53,7 @@ pub(super) const FILTERS: &[FilterMap] = &[
         inputs: &[("input1", "input")],
         params: &[("alphamult", "flatten_alpha"), ("mattelevel", "matte")],
     },
-    FilterMap { sbs: "hsl", def: "hsl", inputs: &[("input1", "input")], params: &[("hue", "hue"), ("saturation", "saturation"), ("luminance", "lightness")] },
+    FilterMap { sbs: "hsl", def: "hsl", inputs: &[("input1", "input")], params: &[("hue", "hue"), ("saturation", "saturation"), ("luminosity", "lightness")] },
     FilterMap { sbs: "bitmap", def: "bitmap", inputs: &[], params: &[("colorswitch", "color_mode"), ("colorspace", "colour_space")] },
     FilterMap {
         sbs: "levels",
@@ -102,8 +102,8 @@ pub(super) const FILTERS: &[FilterMap] = &[
     FilterMap {
         sbs: "fxmaps",
         def: "fx_map",
-        inputs: &[("background", "background"), ("input", "pattern0")],
-        params: &[("colorswitch", "color_mode"), ("background", "background"), ("opacitymult", "opacity")],
+        inputs: &[("background", "background"), ("inputpattern", "pattern0"), ("input", "pattern0")],
+        params: &[("colorswitch", "color_mode"), ("background", "background"), ("hurst", "roughness"), ("opacitymult", "opacity")],
     },
 ];
 pub(super) const BASE_PARAMS: &[&str] = &["outputsize", "format", "randomseed", "tiling", "pixelsize", "pixelratio", "quality"];

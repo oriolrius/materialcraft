@@ -16,6 +16,15 @@ pub struct ProjectFiles {
 
 impl ProjectFiles {
     pub fn build(package: &Package, filename: &str, archive: bool) -> Result<Self> {
+        Self::build_with_links(package, filename, archive, false)
+    }
+
+    /// Save inside an authorized library tree without duplicating its shared linked resources.
+    pub fn build_linked(package: &Package, filename: &str) -> Result<Self> {
+        Self::build_with_links(package, filename, false, true)
+    }
+
+    fn build_with_links(package: &Package, filename: &str, archive: bool, preserve_links: bool) -> Result<Self> {
         let filename = crate::safe_file_name(filename);
         let stem = filename.rsplit_once('.').map_or(filename.as_str(), |(stem, _)| stem);
         let entry = if archive { SBS_ENTRY.to_string() } else { format!("{stem}.sbs") };
@@ -54,16 +63,16 @@ impl ProjectFiles {
         }
 
         let mut result = Self { entry: entry.clone(), files: BTreeMap::new() };
-        result.add_package(package, &entry, &names)?;
+        result.add_package(package, &entry, &names, preserve_links)?;
         for (source, file) in &names {
             let package = package.dependencies.get(source).ok_or_else(|| bad("Package dependency disappeared"))?;
-            result.add_package(package, file, &names)?;
+            result.add_package(package, file, &names, false)?;
         }
 
         Ok(result)
     }
 
-    fn add_package(&mut self, package: &Package, file: &str, names: &BTreeMap<String, String>) -> Result<()> {
+    fn add_package(&mut self, package: &Package, file: &str, names: &BTreeMap<String, String>, preserve_links: bool) -> Result<()> {
         let mut package = package.clone();
         let folder = file.rsplit_once('/').map_or("", |(folder, _)| folder);
         let local_names = names
@@ -82,6 +91,11 @@ impl ProjectFiles {
                 }
 
                 return Err(bad(format!("Resource `{}` has no data", resource.name)));
+            }
+
+            if preserve_links && !resource.source.is_empty() {
+                resource.bytes = ResourceBytes::default();
+                continue;
             }
 
             let name = crate::safe_file_name(&resource.file);

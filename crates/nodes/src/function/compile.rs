@@ -3,12 +3,16 @@ use materialcraft_core::FunctionGraph;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub fn compile(graph: &FunctionGraph, seed: u32) -> Result<Program, String> {
-    compile_nested(graph, seed, 0, &mut 4096)
+    let mut remaining = super::MAX_EXPANDED_NODES;
+    compile_nested(graph, seed, 0, &mut remaining)
 }
 
 fn compile_nested(graph: &FunctionGraph, seed: u32, depth: usize, remaining: &mut usize) -> Result<Program, String> {
+    if graph.nodes.len() > 4096 {
+        return Err("function exceeds the 4096-node graph limit".into());
+    }
     if depth > 8 || graph.nodes.len() > *remaining {
-        return Err("function exceeds the 8-level or 4096-node execution limit".into());
+        return Err("function exceeds the 8-level or 8192-node expanded execution limit".into());
     }
     *remaining -= graph.nodes.len();
     let output = super::output_node(graph).ok_or("function has no result node")?.id;

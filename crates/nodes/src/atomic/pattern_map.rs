@@ -10,6 +10,7 @@ pub(super) fn definition() -> NodeDefinition {
         .any_in("background", "Background")
         .any_in("pattern0", "Input image 0")
         .pattern_graph("pattern", "FX-Map graph", PatternGraph::with_root(PatternNodeKind::Quadrant))
+        .float("roughness", "Roughness", 0.0, 0.0, 2.0)
         .float("opacity", "Opacity", 1.0, 0.0, 10.0)
         .boolean("color_mode", "Color output", false)
         .color("background", "Background color", [0.0, 0.0, 0.0, 1.0])

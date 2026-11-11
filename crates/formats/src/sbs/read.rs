@@ -30,8 +30,15 @@ pub fn read_sbs(bytes: &[u8], name: &str, linked: &dyn Fn(&str) -> Option<Vec<u8
         _ => "Untitled package".to_string(),
     };
 
-    let mut reader =
-        SbsReader { text, warnings: &mut warnings, dependencies: HashMap::new(), graph_names: HashMap::new(), resource_names: HashMap::new(), node_count: 0 };
+    let mut reader = SbsReader {
+        text,
+        warnings: &mut warnings,
+        dependencies: HashMap::new(),
+        graph_names: HashMap::new(),
+        resource_names: HashMap::new(),
+        external_resource_names: HashMap::new(),
+        node_count: 0,
+    };
     for dependency in child_element(root, "dependencies").into_iter().flat_map(|d| children_named(d, "dependency")) {
         if let (Some(uid), Some(file)) = (child_value(dependency, "uid"), child_value(dependency, "filename")) {
             reader.dependencies.insert(uid.to_string(), file.to_string());
@@ -41,9 +48,11 @@ pub fn read_sbs(bytes: &[u8], name: &str, linked: &dyn Fn(&str) -> Option<Vec<u8
     // Load resources before resolving graph references
     let content = child_element(root, "content");
     let mut pkg = Package::new(&package_name);
+    pkg.format_version = child_value(root, "formatVersion").filter(|version| !version.trim().is_empty()).map(str::to_string);
     let mut graph_elements: Vec<(String, XmlNode)> = Vec::new();
     if let Some(content) = content {
         reader.collect_items(content, "", &mut pkg, &mut graph_elements, linked);
+        super::linked_resources::read(&mut reader, content, &mut pkg, linked);
     }
 
     // Name every graph first so instances can refer to graphs defined later in the file

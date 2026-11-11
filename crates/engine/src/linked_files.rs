@@ -38,17 +38,17 @@ impl crate::Session {
 }
 
 pub(crate) fn load(package: &mut Package) -> Vec<String> {
+    load_references(package, references(package))
+}
+
+fn references(package: &Package) -> Vec<String> {
+    package.graphs.iter().flat_map(|graph| graph.instances()).filter(|instance| !instance.package.is_empty()).map(|instance| instance.package.clone()).collect()
+}
+
+/// Seed the registry with already parsed library packages before traversing dependencies. The
+/// registry stays flat so shared dependencies are parsed once and cannot form Arc ownership cycles.
+pub(crate) fn load_references(package: &mut Package, mut pending: Vec<String>) -> Vec<String> {
     use std::{collections::BTreeSet, sync::Arc};
-    let references = |package: &Package| {
-        package
-            .graphs
-            .iter()
-            .flat_map(|graph| graph.instances())
-            .filter(|instance| !instance.package.is_empty())
-            .map(|instance| instance.package.clone())
-            .collect::<Vec<_>>()
-    };
-    let mut pending = references(package);
     let mut visited = BTreeSet::new();
     let mut warnings = Vec::new();
     while let Some(path) = pending.pop() {

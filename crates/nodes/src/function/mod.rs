@@ -1,5 +1,9 @@
 //! Native function primitives, compilation and bounded evaluation
 
+// Individual graphs stay capped at 4096 nodes. Shared calls can expand beyond that size
+// (the bundled noise/render functions use 4426/6997), but must not grow without a ceiling.
+const MAX_EXPANDED_NODES: usize = 8192;
+
 mod arithmetic;
 mod catalog;
 mod compile;

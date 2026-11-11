@@ -225,6 +225,10 @@ pub fn save_files_at(session: &Session, path: &str) -> Result<materialcraft_form
     let archive = is_mcraft(path);
     let package = if archive { session.pkg.clone() } else { package_for_save(session, Some(path)) };
     let filename = std::path::Path::new(path).file_name().and_then(|name| name.to_str()).unwrap_or("package.sbs");
+    #[cfg(not(target_arch = "wasm32"))]
+    if !archive && materialcraft_formats::sbs::library::contains_file(std::path::Path::new(path)) {
+        return Ok(materialcraft_formats::project::ProjectFiles::build_linked(&package, filename)?);
+    }
     Ok(materialcraft_formats::project::ProjectFiles::build(&package, filename, archive)?)
 }
 

@@ -76,7 +76,8 @@ values whose own registries are empty, so cross-file references cannot create ow
 The registry is runtime state; SBS serializes the file references and connectors instead.
 Function instances resolve to bounded runtime call bodies before cooking. Each compiled call owns
 its program and reuses separate evaluation storage, so source lookup and compilation never happen
-per pixel. Calls share the execution-step budget and are capped at eight levels and 4096 nodes.
+per pixel. Calls share the execution-step budget and are capped at eight levels, 4096 nodes per
+graph and 8192 nodes across expanded calls.
 SBS Function nodes store the source URI in their instance data; a `materialcraftInterface` cache
 preserves unconnected input pins when a source file is unavailable.
 
@@ -96,13 +97,20 @@ name conflicts in the destination folder. Rename remains an explicit context-men
 
 `sbs://` resolves beneath `assets/sbs/`. Native installations can place that directory beside the
 executable or set `MATERIALCRAFT_SBS_DIR`; packaged and browser builds also embed the standard
-library. Alias paths cannot escape that root, and saved packages retain the alias. The Function
+library. Alias paths cannot escape that root; saves outside the library retain the alias. The Function
 Library lists these source graphs and inserts references into Function and processor canvases.
 Library aliases are read-only save destinations; an edited library can be saved to a local path.
 Resource paths resolve beside their owning package: `resources/tile.png` in
 `sbs://functions.sbs` reads `assets/sbs/resources/tile.png`, also addressable as
-`sbs://resources/tile.png`. Nested packages use their own adjacent `resources/` directory.
-Loaded resource bytes are embedded on save; unavailable files keep their reference and missing state.
+`sbs://resources/tile.png`. Nested library packages can use `../resources/` paths within
+the library root. Filesystem resolution checks the canonical target to prevent escaping that root.
+Native saves inside the library retain loaded resource links and write ordinary relative paths;
+ordinary project saves copy resource bytes alongside the package, and byte-only saves embed them.
+Unavailable resources retain their reference and missing state.
+Bitmap/SVG references into another package import only the requested resource declarations,
+resolving asset paths beside that owner. These become local resource snapshots with distinct
+names on collisions; saving retains shared asset links inside the library or carries their bytes
+in portable saves. The owning package's graphs are not recursively imported for resource lookup.
 
 Every session loads the whole library folder once per process (`engine::node_library`, cached
 until `library.reload`). Each package joins every session's dependencies, so its graphs can be
@@ -110,8 +118,16 @@ instanced, and the Library lists them: function graphs under Functions, sorted i
 sub-categories by their folder (`Functions/Math/Pi` → Constant), other graphs under their attribute
 category. A package whose titled frames name Library categories ("Filters - Blurs") can also lay
 the tree out (`formats::sbs::read_layout`): each node inside a frame becomes an entry there, listed
-as missing until a package in the folder provides it. Installed and browser builds embed
-`functions.sbs`.
+as missing until a package in the folder provides it. Installed and browser builds embed all SBS
+packages and shared resources, compressed at build time. Library packages share a flat dependency
+registry; only sources reachable from open packages refresh their instance interfaces on edits.
+
+The local `sbs_library_build` example converts native XML without a model round trip, checking that
+computational fields survive presentation edits and reference rewriting. It generates independent
+resource substitutes without reading source resource files. It retains supplied graph implementations;
+these edits do not establish redistribution rights. Native dependency closure and XML preservation do
+not establish runtime compatibility. The `sbs_library_audit` engine example separately reports import
+warnings and standalone function compilation failures; it does not validate every graph's output.
 
 Importing a user-supplied function package preserves its graph bodies, connections and positions;
 it does not replace them with the bundled library. Redundant legacy instance connectors are retained
@@ -150,8 +166,9 @@ cannot compile instead of substituting empty graphs. The source graph bodies are
 rewritten metadata does not establish redistribution rights.
 Local tests compare every converted body and evaluate all 171 functions against the supplied
 package with valid inputs and caller context. External runtime import and numerical compatibility
-still require validation. SBS's `updaterVersion` derives from the workspace's Cargo version;
-its format schema version is a separate constant.
+still require validation. The first SBS save writes the workspace's Cargo version to both
+`formatVersion` and `updaterVersion`. The package model retains the baseline `formatVersion`
+when reopening a document; later saves refresh only `updaterVersion`.
 
 Every user-visible action is a `CommandSpec` (`engine/src/*_cmds.rs`): id, label, menu, shortcut,
 params doc, `enabled`, `run`. The UI calls them through `MaterialCraftApp::run`; the CLI, the JSON
@@ -251,6 +268,21 @@ entry `package.sbs` and `resources/`, with no manifest or private graph payload.
 save, reload and save copies independently. The same clean-room SBS codec writes native filters,
 ports, parameters, function graphs, pattern graphs and resources. Unsupported imports produce
 warnings; unknown nodes remain placeholders.
+
+Dynamic Gradient maps native `coordinate` and `uvselector` fields to position and orientation,
+including parameter functions. Earlier `position`/`orientation` spellings remain readable.
+
+FX-Map maps the native `hurst` parameter to Roughness, including parameter functions and SBS
+round trips. Rendering uses Hurst octave attenuation `2^(-roughness * quadrant_depth)` on each
+pattern's opacity, including alpha blending, while retaining the background. Switch, Iterate and
+Dot nodes do not increase that depth. Omitted roughness stays neutral for existing documents.
+This is an independent depth-weighting model; exact external-runtime pixel parity is unverified.
+The traversal budget permits full 512-by-512 quadtrees while retaining a 1,048,576-visit ceiling
+and the separate raster sample budget. Levels channel controls and FX-Map background functions
+can return either a scalar or Float4; scalar backgrounds keep opaque alpha. Other vector
+parameters retain exact output-type checks. Library conversion qualifies known bare standard
+function calls through an existing declared dependency, preserving local definitions and explicit
+references. It never chooses an unknown function target.
 
 `formats::project::ProjectFiles` builds either representation without changing the live package.
 Imports retain original bytes in snapshot history, including before the first save. Content-based

@@ -5,6 +5,12 @@ use std::collections::BTreeMap;
 /// How many slider spans the hard limit extends past each end of a parameter's range
 const HARD_SPAN: f32 = 16.0;
 
+/// Native channel controls also accept a single grayscale value, broadcast by the evaluator.
+/// Other vector parameters keep their exact function output type.
+pub fn accepts_scalar_function(definition: &str, parameter: &str) -> bool {
+    matches!((definition, parameter), ("levels", "in_low" | "in_mid" | "in_high" | "out_low" | "out_high") | ("fx_map", "background"))
+}
+
 /// Clamp `v` to `[lo, hi]`; a non-finite `v` becomes `fallback`
 fn clamp_finite(v: f32, lo: f32, hi: f32, fallback: f32) -> f32 {
     if v.is_finite() { v.clamp(lo, hi) } else { fallback }

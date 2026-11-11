@@ -3,7 +3,8 @@ use std::{collections::BTreeMap, sync::Arc};
 
 /// Resolve calls once per document edit, with bounded source expansion
 pub fn resolve_instances(function: &mut FunctionGraph, local: &Package, sources: &BTreeMap<String, Arc<Package>>) {
-    resolve(function, local, sources, &mut Vec::new(), &mut 4096);
+    let mut remaining = super::MAX_EXPANDED_NODES;
+    resolve(function, local, sources, &mut Vec::new(), &mut remaining);
 }
 
 fn resolve(function: &mut FunctionGraph, local: &Package, sources: &BTreeMap<String, Arc<Package>>, stack: &mut Vec<(usize, String)>, remaining: &mut usize) {
@@ -25,8 +26,11 @@ fn resolve(function: &mut FunctionGraph, local: &Package, sources: &BTreeMap<Str
                 return Err("Function Graph dependency cycle".into());
             }
 
+            if body.nodes.len() > 4096 {
+                return Err("Function Graph exceeds the 4096-node graph limit".into());
+            }
             if stack.len() >= 8 || body.nodes.len() > *remaining {
-                return Err("Function instances exceed the 8-level or 4096-node limit".into());
+                return Err("Function instances exceed the 8-level or 8192-node expanded limit".into());
             }
 
             if graph.exposed.len() > 4096
