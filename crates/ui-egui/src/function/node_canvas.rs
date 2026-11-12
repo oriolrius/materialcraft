@@ -46,10 +46,17 @@ pub(super) fn paint(
     }
     node_card::outline(painter, bounds, zoom, Stroke::new(if selected { 2.0 } else { 1.0 }, outline));
 
+    let text_color = if output { Color32::from_gray(0x20) } else { tokens.text };
     if missing {
         painter.text(body.center(), Align2::CENTER_CENTER, crate::i18n::tr("MISSING"), FontId::proportional(15.0 * zoom), Color32::WHITE);
-    } else if node.value.is_none() {
-        let text_color = if output { Color32::from_gray(0x20) } else { tokens.text_dim };
-        painter.text(body.center(), Align2::CENTER_CENTER, egui_phosphor::regular::CODE, FontId::proportional(30.0 * zoom), text_color);
+    } else if let Some(value) = &node.value {
+        // The fields are too small to use from far away, so the value is only shown
+        if !super::node_face::editable(zoom) {
+            node_card::paint_symbol(painter, body, zoom, &crate::graph::value_text::value_text(value), text_color);
+        }
+    } else if node.instance.is_some() {
+        node_card::paint_symbol(painter, body, zoom, egui_phosphor::regular::FUNCTION, text_color);
+    } else {
+        node_card::paint_symbol(painter, body, zoom, super::node_face::symbol(&node.op), text_color);
     }
 }

@@ -22,6 +22,7 @@ mod actions;
 mod geometry;
 mod input;
 mod node_canvas;
+mod node_face;
 mod panel;
 
 mod function_canvas;

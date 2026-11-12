@@ -604,3 +604,50 @@ fn enabled_generators_use_parent_size_and_inherit_other_input_base_parameters() 
         }
     }
 }
+
+#[test]
+fn variables_set_by_a_base_parameter_function_reach_the_nodes_other_functions() {
+    use materialcraft_core::{BaseParameter, FunctionGraph};
+
+    let mut size = FunctionGraph::default();
+    let grid = size.add_constant(Value::Int(2));
+    let store = size.add("set", &[grid], Some(Value::Text("grid".into())));
+    let unchanged = size.add_constant(Value::Int2([0, 0]));
+    size.output = Some(size.add("sequence", &[store, unchanged], None));
+
+    let mut roughness = FunctionGraph::default();
+    let read = roughness.add("get_integer1", &[], Some(Value::Text("grid".into())));
+    roughness.output = Some(roughness.add("tofloat", &[read], None));
+
+    let mut graph = Graph::new("Shared variables");
+    let generator = graph.add_node("fx_map", [0.0; 2]);
+    let node = graph.node_mut(generator).unwrap();
+    node.base.functions.insert(BaseParameter::OutputSize, size);
+    node.functions.insert("roughness".into(), roughness);
+    let mut package = Package::new("Shared variables");
+    package.graphs.push(graph);
+
+    let cooked = cook(&package, 0, &Options::new(&no_res), &Mutex::new(Cache::default()));
+    let result = &cooked.nodes[&generator];
+    assert_eq!(result.error, None);
+    assert_eq!(result.parameters.get("roughness"), Some(&Value::Float(2.0)));
+}
+
+#[test]
+fn a_color_parameter_function_may_return_a_gray_level_or_an_rgb_triple() {
+    use materialcraft_core::FunctionGraph;
+
+    for (value, expected) in [(Value::Float(0.25), [0.25, 0.25, 0.25, 1.0]), (Value::Float3([0.1, 0.2, 0.3]), [0.1, 0.2, 0.3, 1.0])] {
+        let mut graph = Graph::new("Color function");
+        let uniform = graph.add_node("uniform", [0.0; 2]);
+        graph.node_mut(uniform).unwrap().functions.insert("color".into(), FunctionGraph::constant(value));
+        let mut package = Package::new("Color function");
+        package.graphs.push(graph);
+
+        let cooked = cook(&package, 0, &Options::new(&no_res), &Mutex::new(Cache::default()));
+        let result = &cooked.nodes[&uniform];
+
+        assert_eq!(result.error, None);
+        assert_eq!(result.parameters.get("color").and_then(Value::as_vec4), Some(expected));
+    }
+}

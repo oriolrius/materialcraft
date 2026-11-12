@@ -77,6 +77,7 @@ mod color_space;
 mod connection_commands;
 mod export_request;
 mod export_size;
+mod library_preview;
 pub use clip::Clip;
 pub use color_space::ColorSpace;
 pub use export_request::ExportRequest;

@@ -12,7 +12,9 @@ pub(crate) fn evaluate(
 ) -> Result<Value, String> {
     let program = compile(function, seed)?;
     let scalar_channel = allow_scalar && expected == ValueType::Float4 && program.output_type() == ValueType::Float as u32;
-    if program.output_type() != expected as u32 && !scalar_channel {
+    // A color parameter also takes a gray level or an opaque RGB triple.
+    let widened = expected == ValueType::Float4 && [ValueType::Float as u32, ValueType::Float3 as u32].contains(&program.output_type());
+    if program.output_type() != expected as u32 && !scalar_channel && !widened {
         return Err(format!("output must be {}", expected.label()));
     }
 
@@ -29,6 +31,12 @@ pub(crate) fn evaluate(
     if !finite {
         return Err("function returned a non-finite value".into());
     }
+
+    let value = match value {
+        Value::Float(level) if !scalar_channel && widened => Value::Float4([level, level, level, 1.0]),
+        Value::Float3([red, green, blue]) if widened => Value::Float4([red, green, blue, 1.0]),
+        value => value,
+    };
 
     variables.extend(state.assignments().clone());
 

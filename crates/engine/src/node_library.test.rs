@@ -291,3 +291,17 @@ fn function_tags_choose_library_filters_before_path_fallbacks() {
     assert_eq!(categories("Tagged"), ["Functions/Comparison", "Functions/Easings"]);
     assert_eq!(categories("Fallback"), ["Functions/Maths"]);
 }
+
+/// Library graphs render a preview from sample inputs; graphs that make no image give none.
+#[test]
+fn library_graphs_cook_previews_from_sample_inputs() {
+    let library = Arc::new(NodeLibrary::load(&library::files()));
+    let preview = |package: &str, graph: &str| NodeLibrary::preview(&library, package, graph, 32);
+
+    let filter = preview("sbs://blur_hq.sbs", "blur_hq").unwrap();
+    assert_eq!((filter.w, filter.h), (32, 32));
+    assert!(preview("sbs://materials/pbr/bricks_001.sbs", "bricks_001").is_some());
+    assert!(preview("sbs://noise_bnw_spots_1.sbs", "bnw_spots_1").is_some(), "an FX-Map noise reads the variables its size function sets");
+    assert!(preview("sbs://blur_hq.sbs", "no_such_graph").is_none());
+    assert!(preview("sbs://functions.sbs", "Functions/Math/Pi").is_none(), "a function has no image");
+}

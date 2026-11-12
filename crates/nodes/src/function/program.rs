@@ -117,7 +117,7 @@ impl Program {
                         storage.random = state.random;
                         let result = call.program.run(context, storage, remaining_steps);
                         state.random = storage.random;
-                        if result.is_ok() {
+                        if call.exports && result.is_ok() {
                             // Set publishes into the caller's scope; arguments and defaults stay local.
                             state.variables.extend(storage.assignments.clone());
                             state.assignments.extend(storage.assignments.clone());
@@ -154,7 +154,7 @@ impl Program {
                 }
                 LoopStart(index) => {
                     let last = state.values.pop().ok_or("missing loop initialization")?;
-                    self.clear_dynamic_results(state);
+                    self.clear_loop_results(index, state)?;
                     state.steps.push(LoopCondition { instruction: index, iteration: 0, last });
                     state.steps.push(Enter(self.input(index, 1)?));
                 }
@@ -164,14 +164,14 @@ impl Program {
                     if exit || (maximum >= 0 && iteration >= maximum as u32) {
                         state.values.push(last);
                     } else {
-                        self.clear_dynamic_results(state);
+                        self.clear_loop_results(index, state)?;
                         state.steps.push(LoopBody { instruction: index, iteration: iteration.saturating_add(1) });
                         state.steps.push(Enter(self.input(index, 2)?));
                     }
                 }
                 LoopBody { instruction: index, iteration } => {
                     let last = state.values.pop().ok_or("missing loop body result")?;
-                    self.clear_dynamic_results(state);
+                    self.clear_loop_results(index, state)?;
                     state.steps.push(LoopCondition { instruction: index, iteration, last });
                     state.steps.push(Enter(self.input(index, 1)?));
                 }
@@ -187,13 +187,14 @@ impl Program {
         Ok(result)
     }
 
-    fn clear_dynamic_results(&self, state: &mut EvaluationState) {
+    fn clear_loop_results(&self, index: usize, state: &mut EvaluationState) -> Result<(), String> {
         // A node's outgoing wires share its computed value, including reads, branches and side effects.
-        // Loop phases evaluate variable-dependent nodes anew; constants remain reusable.
-        for (instruction, register) in self.instructions.iter().zip(&mut state.registers) {
-            if !instruction.pure {
+        // Only the current loop's condition and body run again; unrelated cached values stay intact.
+        for repeated in &self.instruction(index)?.repeated {
+            if let Some(register) = state.registers.get_mut(*repeated) {
                 *register = None;
             }
         }
+        Ok(())
     }
 }

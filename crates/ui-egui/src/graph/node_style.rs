@@ -68,6 +68,11 @@ pub fn node_label(n: &Node) -> String {
     })
 }
 
+/// Whether a node with these outputs has a picture to show; a node that only outputs values shows its number in a short body
+pub fn shows_preview(outputs: &[materialcraft_engine::eval::Port]) -> bool {
+    outputs.is_empty() || outputs.iter().any(|port| port.kind != PortKind::Value)
+}
+
 /// Graph-space rectangle of a node card
 pub fn node_rect(node: &Node, inputs: usize, outputs: usize, previews: bool) -> Rect {
     node_card::bounds(node.pos, inputs, outputs, previews, node.def == "dot")

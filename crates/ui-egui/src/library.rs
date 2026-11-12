@@ -128,18 +128,61 @@ pub fn show(app: &mut MaterialCraftApp, ui: &mut Ui) {
     ui.add_space(2.0);
     let available_size = ui.available_size();
 
-    // The tree takes what the tiles leave: one column of tiles in a narrow panel
-    let tree_width = (available_size.x * 0.6).clamp(120.0, 230.0).min(available_size.x - 92.0).max(80.0);
+    // Unless dragged, the tree takes what the tiles leave: one column of tiles in a narrow panel
+    let automatic = (available_size.x * 0.6).clamp(120.0, 230.0);
+    let chosen = if app.ui.library_tree_width > 0.0 { app.ui.library_tree_width } else { automatic };
+    let tree_width = tree_width(chosen, available_size.x);
     let top_down = egui::Layout::top_down(egui::Align::Min);
     ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
         ui.allocate_ui_with_layout(vec2(tree_width, available_size.y), top_down, |ui| {
             egui::ScrollArea::vertical().id_salt("lib-tree").auto_shrink([false, false]).show(ui, |ui| category_tree(app, ui, &all));
         });
-        ui.separator();
+        match divider(ui, tree_width, available_size.y) {
+            Some(Divider::Dragged(width)) => app.ui.library_tree_width = self::tree_width(width, available_size.x),
+            Some(Divider::Reset) => app.ui.library_tree_width = 0.0,
+            None => {}
+        }
         ui.allocate_ui_with_layout(vec2(ui.available_width(), available_size.y), top_down, |ui| {
             egui::ScrollArea::vertical().id_salt("lib-items").auto_shrink([false, false]).show(ui, |ui| items(app, ui, &all, &target));
         });
     });
+}
+
+/// The tree's width in a panel `available` wide: neither the tree nor the tiles close completely
+fn tree_width(chosen: f32, available: f32) -> f32 {
+    const NARROWEST_TREE: f32 = 60.0;
+    const NARROWEST_TILES: f32 = 92.0;
+
+    chosen.min(available - NARROWEST_TILES).max(NARROWEST_TREE)
+}
+
+/// What the pointer did to the Library's divider
+enum Divider {
+    /// Dragged to this tree width
+    Dragged(f32),
+    /// Double-clicked: back to the automatic width
+    Reset,
+}
+
+/// The draggable bar between the tree and the tiles
+fn divider(ui: &mut Ui, tree_width: f32, height: f32) -> Option<Divider> {
+    let tokens = Tokens::get(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(vec2(9.0, height), Sense::click_and_drag());
+    crate::widgets::name(&response, egui::Role::Splitter, "Library divider");
+    let response = response.on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+    if response.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+    }
+
+    let active = response.hovered() || response.dragged();
+    let line = Rect::from_center_size(rect.center(), vec2(if active { 2.0 } else { 1.0 }, height));
+    ui.painter().rect_filled(line, 0.0, if active { tokens.accent } else { tokens.text_dim.gamma_multiply(0.35) });
+
+    if response.double_clicked() {
+        return Some(Divider::Reset);
+    }
+    response.dragged().then(|| Divider::Dragged(tree_width + response.drag_delta().x))
 }
 
 /// Expose availability and canvas filters without changing the selected category.
@@ -366,11 +409,15 @@ fn items(app: &mut MaterialCraftApp, ui: &mut Ui, entries: &[LibraryEntry], targ
     }
 }
 
-/// The entry's thumbnail: a cooked preview for native nodes, its category's icon otherwise
+/// The entry's thumbnail: a cooked preview for native nodes and library graphs, its category's icon otherwise
 fn preview(app: &mut MaterialCraftApp, ui: &Ui, ctx: &egui::Context, entry: &LibraryEntry, rect: Rect, fade: f32) {
     let painter = ui.painter();
     let (texture, color) = match &entry.item {
         LibraryItem::Node { def } if entry.missing.is_none() && def != "dot" => (app.thumbs.library(ctx, def), header_color(def)),
+        // Only tiles on screen ask for their graph to be cooked
+        LibraryItem::Instance { package, graph } if entry.missing.is_none() && ui.is_rect_visible(rect) => {
+            (app.thumbs.graph(ctx, &app.session.library, package, graph), category_color(&entry.category))
+        }
         _ => (None, category_color(&entry.category)),
     };
     match texture {

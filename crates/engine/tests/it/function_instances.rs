@@ -86,7 +86,7 @@ fn function_expansion_allows_several_bounded_bodies_but_still_caps_total_work() 
     let mut allowed = caller(3);
     function::resolve_instances(&mut allowed, &package, &BTreeMap::new());
     assert_eq!(evaluate(&allowed), Value::Float(3.0));
-    let mut oversized = caller(4);
+    let mut oversized = caller(32);
     function::resolve_instances(&mut oversized, &package, &BTreeMap::new());
     assert!(function::compile(&oversized, 0).err().unwrap().contains("limit"));
     // Compiling a pre-resolved tree must enforce its own budget too.
@@ -251,7 +251,7 @@ fn function_calls_reject_wrong_canvas_cycles_and_outputless_sources() {
 }
 
 #[test]
-fn calls_publish_assignments_and_evaluate_arguments_once() {
+fn calls_evaluate_arguments_once_and_share_the_variables_they_set() {
     let mut package = source();
     let mut source = FunctionGraph::default();
     let input = source.add("get_float1", &[], Some(Value::Text("amount".into())));
@@ -275,11 +275,21 @@ fn calls_publish_assignments_and_evaluate_arguments_once() {
         inputs: vec![GraphPort { identifier: "amount".into(), type_code: 256 }],
         outputs: vec![GraphPort { identifier: "output".into(), type_code: 256 }],
     });
-    let after = caller.add("get_float1", &[], Some(Value::Text("private".into())));
-    let total = caller.add("add", &[call, after], None);
+    let total = caller.add("add", &[call, get], None);
     caller.output = Some(caller.add("sequence", &[init, total], None));
     function::resolve_instances(&mut caller, &package, &BTreeMap::new());
-    // The argument is evaluated once (2 + 2), and Set publishes 99 to the caller's node scope.
+    // The Get node ran once, before the argument's Set: 1; the call doubles its argument 2
+    assert_eq!(evaluate(&caller), Value::Float(5.0));
+
+    // A Get node that runs after the call reads what the called graph set, as the library's size helpers rely on
+    let after = caller.add("get_float1", &[], Some(Value::Text("private".into())));
+    let read_after = caller.add("sequence", &[call, after], None);
+    caller.output = Some(caller.add("sequence", &[init, read_after], None));
+    assert_eq!(evaluate(&caller), Value::Float(99.0));
+
+    // A separate Get after the call sees the assignment while the call result stays cached.
+    let total = caller.add("add", &[call, after], None);
+    caller.output = Some(caller.add("sequence", &[init, total], None));
     assert_eq!(evaluate(&caller), Value::Float(103.0));
 }
 

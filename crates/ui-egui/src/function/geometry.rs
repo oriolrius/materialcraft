@@ -19,8 +19,9 @@ fn input_count(node: &FunctionNode) -> usize {
     materialcraft_engine::nodes::function::input_identifiers(node).count()
 }
 
-pub(super) fn node_rect(node: &FunctionNode, previews: bool) -> Rect {
-    node_card::bounds(node.pos, input_count(node), 1, previews, node.op == "passthrough")
+/// Function nodes show a value or a symbol, never a preview, so their body only fits that
+pub(super) fn node_rect(node: &FunctionNode) -> Rect {
+    node_card::bounds_with_body(node.pos, input_count(node), 1, super::node_face::height(node), node.op == "passthrough")
 }
 
 pub(super) fn in_port(node: &FunctionNode, bounds: Rect, index: usize) -> Pos2 {
@@ -32,7 +33,7 @@ pub(super) fn out_port(node: &FunctionNode, bounds: Rect) -> Pos2 {
 }
 
 pub(super) fn preview_rect(app: &MaterialCraftApp, editor: &FunctionEditor, node: &FunctionNode, snap: bool, selected: bool) -> Rect {
-    let mut bounds = node_rect(node, app.ui.prefs.thumbnails);
+    let mut bounds = node_rect(node);
     if let Some(FunctionDrag::Node(d, delta)) = &editor.drag
         && (*d == node.id || selected)
     {
