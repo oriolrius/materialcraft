@@ -14,6 +14,7 @@ pub(super) fn definition() -> NodeDefinition {
         .float("opacity", "Opacity", 1.0, 0.0, 10.0)
         .boolean("color_mode", "Color output", false)
         .color("background", "Background color", [0.0, 0.0, 0.0, 1.0])
+        .float4("render_region", "Render region", [0.0, 1.0, 0.0, 1.0], -65536.0, 65536.0)
         .any_out()
         .cook(crate::pattern::cook)
 }

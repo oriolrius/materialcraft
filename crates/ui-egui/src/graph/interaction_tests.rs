@@ -406,7 +406,8 @@ fn function_dots_wire_move_and_save_with_regular_card_geometry() {
     let card = frames.app.graph.rects.iter().find(|(id, _)| id.0 == u64::from(multiply)).unwrap().1;
     assert!((dot_bounds.width() / zoom - 14.0).abs() < 0.01);
     assert!((card.width() / zoom - 100.0).abs() < 0.01);
-    assert!((card.height() / zoom - 132.0).abs() < 0.01);
+    // An operator shows its symbol in a body that only fits its two inputs
+    assert!((card.height() / zoom - 76.0).abs() < 0.01);
     assert!(!frames.canvas_text.iter().any(|text| text.contains("Reroute")));
     let dot_ports: Vec<_> = frames.app.graph.ports.iter().filter(|port| port.node.0 == u64::from(dot)).collect();
     assert_eq!(dot_ports.len(), 2);

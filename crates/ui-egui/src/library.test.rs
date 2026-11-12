@@ -165,3 +165,11 @@ fn graph_items_are_available_and_insertable_in_every_editor() {
         assert_eq!((items.comments.len(), items.frames.len(), items.pins.len()), (1, 1, 1), "{kind}");
     }
 }
+
+#[test]
+fn the_divider_leaves_room_for_the_tree_and_the_tiles() {
+    assert_eq!(tree_width(150.0, 400.0), 150.0);
+    assert_eq!(tree_width(5.0, 400.0), 60.0, "the tree never closes");
+    assert_eq!(tree_width(390.0, 400.0), 308.0, "the tiles keep one column");
+    assert_eq!(tree_width(200.0, 100.0), 60.0, "a panel too narrow for both keeps the tree");
+}

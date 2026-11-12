@@ -26,6 +26,8 @@ pub struct UiState {
     /// The library entry last clicked
     #[serde(skip)]
     pub library_selected: Option<String>,
+    /// Width of the Library's category tree, set by dragging its divider; 0 = automatic
+    pub library_tree_width: f32,
     /// Recently opened or saved packages, newest first
     pub recent: Vec<String>,
     /// New graph dialog fields
@@ -59,6 +61,7 @@ impl Default for UiState {
             library_show_missing: true,
             library_show_other: true,
             library_selected: None,
+            library_tree_width: 0.0,
             recent: Vec::new(),
             new_graph_kind: materialcraft_engine::core::GraphKind::Material,
             new_graph_template: "pbr".into(),

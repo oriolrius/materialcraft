@@ -6,6 +6,7 @@ mod dialogs;
 mod export_window;
 mod graph_properties;
 mod interface_scale;
+mod node_look;
 mod normal_maps;
 mod numeric_input;
 mod preview_resolution;

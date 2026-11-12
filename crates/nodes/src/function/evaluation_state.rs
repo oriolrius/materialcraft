@@ -10,6 +10,8 @@ pub struct EvaluationState {
     pub(crate) registers: Vec<Option<Value>>,
     pub(crate) variables: BTreeMap<String, Value>,
     pub(crate) random: u32,
+    /// Mixed into the seed of this evaluation, so every pixel of a processor draws its own random numbers
+    pub(crate) seed_offset: u32,
     pub(crate) calls: BTreeMap<usize, EvaluationState>,
 }
 

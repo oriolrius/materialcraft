@@ -27,12 +27,15 @@ pub(crate) fn cook(context: &CookContext) -> CookResult {
 
     let mut pending = Vec::new();
     if let Some(root) = graph.root {
-        pending.push(PatternVisit { node: root, center: [0.5; 2], extent: 1.0, depth: 0, number: 0, seed: context.seed, variables: context.vars.clone() });
+        pending.push(PatternVisit { node: root, center: [0.5; 2], extent: 1.0, depth: 0, number: 0, seed: context.seed });
     }
 
+    // One set of user variables follows the walk in visiting order: an Iterate child reads what the previous iteration set
+    let mut variables = context.vars.clone();
     let mut stamps = Vec::new();
     let mut state = EvaluationState::default();
     let mut remaining = MAX_VISITS;
+    let mut visits = 0_u32;
     while let Some(mut visit) = pending.pop() {
         remaining = remaining.checked_sub(1).ok_or("pattern graph exceeded its execution budget")?;
         let node = nodes.get(&visit.node).ok_or("missing pattern node")?;
@@ -48,10 +51,13 @@ pub(crate) fn cook(context: &CookContext) -> CookResult {
         if node.parameters.get("randominherited").and_then(Value::as_bool) == Some(false) {
             visit.seed = node.parameters.get("randomseed").and_then(Value::as_i32).unwrap_or(0) as u32;
         }
-        visit.variables.insert("$randomseed".into(), Value::Int(visit.seed as i32));
-        visit.variables.insert("$depth".into(), Value::Float(visit.depth as f32));
-        visit.variables.insert("$depthpow2".into(), Value::Float(visit.extent));
-        visit.variables.insert("$number".into(), Value::Float(visit.number as f32));
+        // Every visit draws its own random numbers from the seed it inherited
+        visits = visits.wrapping_add(1);
+        let random = visit.seed.wrapping_mul(0x9E37_79B9) ^ visits.wrapping_mul(0x85EB_CA6B);
+        variables.insert("$randomseed".into(), Value::Int(random as i32));
+        variables.insert("$depth".into(), Value::Float(visit.depth as f32));
+        variables.insert("$depthpow2".into(), Value::Float(visit.extent));
+        variables.insert("$number".into(), Value::Float(visit.number as f32));
 
         let mut parameters = BTreeMap::new();
         for parameter in &definition.params {
@@ -63,11 +69,11 @@ pub(crate) fn cook(context: &CookContext) -> CookResult {
                         size: [context.w as f32, context.h as f32],
                         images: context.inputs.get(1..).unwrap_or(&[]),
                         tile: context.tile,
-                        variables: &visit.variables,
+                        variables: &variables,
                     };
 
                     let value = program.evaluate(&evaluation, &mut state)?;
-                    visit.variables.clone_from(state.variables());
+                    variables.clone_from(state.variables());
                     value
                 }
                 None => node.parameters.get(parameter.id).unwrap_or(&parameter.default).clone(),

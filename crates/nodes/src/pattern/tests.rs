@@ -171,3 +171,93 @@ fn a_full_nine_level_quadtree_renders_one_pattern_per_pixel() {
     let images = (definition.cook)(&context).unwrap();
     assert!(images[0].data.iter().all(|value| (*value - 1.0).abs() < 1e-6));
 }
+
+fn square(graph: &mut PatternGraph, node: usize) {
+    graph.nodes[node].parameters.insert("patterntype".into(), Value::Int(2));
+}
+
+#[test]
+fn an_iteration_reads_the_variables_the_previous_iteration_set() {
+    let mut graph = PatternGraph::default();
+    let iterate = graph.add(PatternNodeKind::Iterate).unwrap();
+    let quadrant = graph.add(PatternNodeKind::Quadrant).unwrap();
+    graph.root = Some(iterate);
+    graph.nodes[0].parameters.insert("numberadded".into(), Value::Int(3));
+    graph.nodes[0].children[1] = Some(quadrant);
+    square(&mut graph, 1);
+
+    let mut function = FunctionGraph::default();
+    let total = function.add("get_float1", &[], Some(Value::Text("total".into())));
+    let step = function.add_constant(Value::Float(0.25));
+    let next = function.add("add", &[total, step], None);
+    function.output = Some(function.add("set", &[next], Some(Value::Text("total".into()))));
+    graph.nodes[1].parameters.insert("opacity".into(), Value::Function(Box::new(function)));
+
+    let image = cook_with_variables(graph, &BTreeMap::from([("total".into(), Value::Float(0.0))])).unwrap().remove(0);
+
+    // 0.25, 0.5 and 0.75 add up; three separate copies of the variable would add 0.25 three times
+    assert!((image.mean()[0] - 1.5).abs() < 1e-5, "{}", image.mean()[0]);
+}
+
+#[test]
+fn the_render_region_is_the_part_of_pattern_space_the_image_shows() {
+    let mut graph = PatternGraph::with_root(PatternNodeKind::Quadrant);
+    square(&mut graph, 0);
+    let definition = find("fx_map").unwrap();
+    let parameters = resolve_params(
+        definition,
+        &BTreeMap::from([("pattern".into(), Value::PatternGraph(Box::new(graph))), ("render_region".into(), Value::Float4([0.0, 2.0, 0.0, 2.0]))]),
+    );
+    let context = CookContext { w: 16, h: 16, seed: 7, tile: false, inputs: &[], params: &parameters, resource: &|_| None, vars: &BTreeMap::new() };
+
+    let image = (definition.cook)(&context).unwrap().remove(0);
+
+    // The unit square fills the top-left quarter of a region twice as wide and tall
+    assert!((image.mean()[0] - 0.25).abs() < 1e-5, "{}", image.mean()[0]);
+    assert_eq!(image.get(3, 3, false)[0], 1.0);
+    assert_eq!(image.get(12, 12, false)[0], 0.0);
+}
+
+#[test]
+fn every_visit_draws_its_own_random_numbers() {
+    let mut graph = PatternGraph::with_root(PatternNodeKind::Quadrant);
+    graph.nodes[0].parameters.insert("patterntype".into(), Value::Int(0));
+    let child = graph.add(PatternNodeKind::Quadrant).unwrap();
+    for slot in 0..4 {
+        graph.nodes[0].children[slot] = Some(child);
+    }
+    square(&mut graph, 1);
+    let mut function = FunctionGraph::default();
+    let range = function.add_constant(Value::Float(1.0));
+    function.output = Some(function.add("rand", &[range], None));
+    graph.nodes[1].parameters.insert("opacity".into(), Value::Function(Box::new(function)));
+
+    let image = cook(graph).unwrap().remove(0);
+
+    let quarters = [image.get(4, 4, false)[0], image.get(12, 4, false)[0], image.get(4, 12, false)[0], image.get(12, 12, false)[0]];
+    assert!(quarters.windows(2).all(|pair| (pair[0] - pair[1]).abs() > 1e-4), "{quarters:?}");
+}
+
+#[test]
+fn a_pixel_on_the_seam_of_two_patterns_is_drawn_once() {
+    let mut graph = PatternGraph::with_root(PatternNodeKind::Quadrant);
+    graph.nodes[0].parameters.insert("patterntype".into(), Value::Int(0));
+    let child = graph.add(PatternNodeKind::Quadrant).unwrap();
+    let grandchild = graph.add(PatternNodeKind::Quadrant).unwrap();
+    for slot in 0..4 {
+        graph.nodes[0].children[slot] = Some(child);
+        graph.nodes[1].children[slot] = Some(grandchild);
+    }
+    graph.nodes[1].parameters.insert("patterntype".into(), Value::Int(0));
+    square(&mut graph, 2);
+    let definition = find("fx_map").unwrap();
+    let parameters = resolve_params(definition, &BTreeMap::from([("pattern".into(), Value::PatternGraph(Box::new(graph)))]));
+    let variables = BTreeMap::new();
+    // Two pixels a side put every pixel center on the corner of four of the sixteen squares
+    let context = CookContext { w: 2, h: 2, seed: 7, tile: true, inputs: &[], params: &parameters, resource: &|_| None, vars: &variables };
+
+    let image = (definition.cook)(&context).unwrap().remove(0);
+
+    assert_eq!(image.get(0, 0, false)[0], 1.0);
+    assert_eq!(image.get(1, 1, false)[0], 1.0);
+}

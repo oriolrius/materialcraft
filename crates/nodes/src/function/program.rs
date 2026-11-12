@@ -29,13 +29,15 @@ impl Program {
 
     pub fn evaluate(&self, context: &EvaluationContext<'_>, state: &mut EvaluationState) -> Result<Value, String> {
         state.variables.clone_from(context.variables);
+        state.seed_offset = 0;
         let mut remaining = MAX_EVALUATION_STEPS;
         self.run(context, state, &mut remaining)
     }
 
     // Pixel assignments are local; only the general evaluator exports the complete environment
-    pub(super) fn evaluate_pixel(&self, context: &EvaluationContext<'_>, state: &mut EvaluationState) -> Result<Value, String> {
+    pub(super) fn evaluate_pixel(&self, context: &EvaluationContext<'_>, state: &mut EvaluationState, pixel: u32) -> Result<Value, String> {
         state.variables.clear();
+        state.seed_offset = crate::random::hash(pixel);
         let mut remaining = MAX_EVALUATION_STEPS;
         self.run(context, state, &mut remaining)
     }
@@ -47,7 +49,7 @@ impl Program {
         state.values.clear();
         state.registers.clear();
         state.registers.resize(self.instructions.len(), None);
-        state.random = context.variables.get("$randomseed").and_then(Value::as_i32).map_or(self.seed, |seed| seed as u32);
+        state.random = context.variables.get("$randomseed").and_then(Value::as_i32).map_or(self.seed, |seed| seed as u32) ^ state.seed_offset;
         state.steps.push(Enter(self.output));
 
         while let Some(step) = state.steps.pop() {
@@ -84,21 +86,32 @@ impl Program {
                     let arguments = state.values.get(base..).ok_or("invalid function operands")?;
                     let result = if let Some(call) = &instruction.call {
                         let storage = state.calls.entry(index).or_default();
+                        storage.seed_offset = state.seed_offset;
                         storage.variables.clone_from(&state.variables);
                         storage.variables.extend(call.defaults.clone());
                         for (name, value) in call.inputs.iter().zip(arguments) {
                             storage.variables.insert(name.clone(), value.clone());
                         }
-                        call.program.run(context, storage, remaining_steps)
+                        let result = call.program.run(context, storage, remaining_steps);
+
+                        // Variables the called graph set stay set for its caller; its own inputs do not leak out
+                        if call.exports && result.is_ok() {
+                            for (name, value) in &storage.variables {
+                                if !call.defaults.contains_key(name) && !call.inputs.contains(name) {
+                                    state.variables.insert(name.clone(), value.clone());
+                                }
+                            }
+                        }
+
+                        result
                     } else {
                         operation::evaluate(instruction, arguments, &mut state.variables, &mut state.random, context)
                     }
                     .map_err(|error| format!("{} ({}): {error}", instruction.definition.label, instruction.id))?;
 
                     state.values.truncate(base);
-                    if instruction.pure
-                        && let Some(register) = state.registers.get_mut(index)
-                    {
+                    // A node runs once per evaluation, so every reader of a Set or a Get sees the same value
+                    if let Some(register) = state.registers.get_mut(index) {
                         *register = Some(result.clone());
                     }
 
@@ -108,11 +121,19 @@ impl Program {
                     let condition = state.values.pop().ok_or("missing branch condition")?;
                     let slot = if value_type::boolean(&condition)? { 1 } else { 2 };
 
+                    state.steps.push(Store(index));
                     state.steps.push(Enter(self.input(index, slot)?));
                 }
                 Sequence(index) => {
                     state.values.pop().ok_or("missing sequence result")?;
+                    state.steps.push(Store(index));
                     state.steps.push(Enter(self.input(index, 1)?));
+                }
+                Store(index) => {
+                    let result = state.values.last().ok_or("missing result to keep")?.clone();
+                    if let Some(register) = state.registers.get_mut(index) {
+                        *register = Some(result);
+                    }
                 }
                 LoopStart(index) => {
                     let last = state.values.pop().ok_or("missing loop initialization")?;
@@ -123,6 +144,9 @@ impl Program {
                     let exit = value_type::boolean(&state.values.pop().ok_or("missing loop condition")?)?;
                     let maximum = self.instruction(index)?.value.as_ref().and_then(Value::as_i32).unwrap_or(100);
                     if exit || (maximum >= 0 && iteration >= maximum as u32) {
+                        if let Some(register) = state.registers.get_mut(index) {
+                            *register = Some(last.clone());
+                        }
                         state.values.push(last);
                     } else {
                         state.steps.push(LoopBody { instruction: index, iteration: iteration.saturating_add(1) });
@@ -131,6 +155,13 @@ impl Program {
                 }
                 LoopBody { instruction: index, iteration } => {
                     let last = state.values.pop().ok_or("missing loop body result")?;
+
+                    // The next iteration evaluates the condition and the body again
+                    for repeated in &self.instruction(index)?.repeated {
+                        if let Some(register) = state.registers.get_mut(*repeated) {
+                            *register = None;
+                        }
+                    }
                     state.steps.push(LoopCondition { instruction: index, iteration, last });
                     state.steps.push(Enter(self.input(index, 1)?));
                 }

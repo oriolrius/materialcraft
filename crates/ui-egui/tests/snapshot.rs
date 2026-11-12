@@ -10,6 +10,9 @@ mod explorer;
 #[path = "snapshot/export.rs"]
 mod export;
 
+#[path = "snapshot/node_look.rs"]
+mod node_look;
+
 #[path = "snapshot/function_instances.rs"]
 mod function_instances;
 

@@ -296,6 +296,13 @@ fn color_boolean_enum_and_text_parameters_use_typed_function_outputs() {
 
     let owner = node(&mut session, "uniform");
     command(&mut session, "graph.node.function", json!({"id": owner, "param": "color", "function": FunctionGraph::constant(Value::Float(0.5))}));
+    // A gray level fills the color channels, as the library's uniform colors rely on
+    let result = &session.cook().nodes[&owner];
+    assert_eq!(result.error, None);
+    assert_eq!(result.parameters["color"].as_vec4(), Some([0.5, 0.5, 0.5, 1.0]));
+
+    let owner = node(&mut session, "uniform");
+    command(&mut session, "graph.node.function", json!({"id": owner, "param": "color", "function": FunctionGraph::constant(Value::Int(1))}));
     assert!(session.cook().nodes[&owner].error.as_ref().unwrap().contains("Float4"));
     let bitmap = node(&mut session, "bitmap");
     assert!(execute(&mut session, "graph.node.function", &json!({"id": bitmap, "param": "resource"})).is_err());

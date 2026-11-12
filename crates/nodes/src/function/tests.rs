@@ -153,7 +153,7 @@ fn time_and_tiling_variables_have_typed_defaults_and_host_overrides() {
             let context = EvaluationContext { scope: Default::default(), position: [0.5; 2], size: [1.0; 2], images: &[], tile: true, variables: &variables };
             let program = compile(&graph, 0).unwrap();
             assert_eq!(program.evaluate(&context, &mut EvaluationState::default()).unwrap(), *expected);
-            assert_eq!(program.evaluate_pixel(&context, &mut EvaluationState::default()).unwrap(), *expected);
+            assert_eq!(program.evaluate_pixel(&context, &mut EvaluationState::default(), 0).unwrap(), *expected);
         }
 
         assert!(evaluate(&graph, &BTreeMap::from([(name.into(), Value::Bool(false))])).unwrap_err().contains("wrong type"));
@@ -225,7 +225,7 @@ fn pixel_assignments_are_local_and_match_exported_evaluation() {
         let mut exported = EvaluationState::default();
         let expected = program.evaluate(&context, &mut exported).unwrap();
         for _ in 0..2 {
-            assert_eq!(program.evaluate_pixel(&context, &mut pixel_state).unwrap(), expected);
+            assert_eq!(program.evaluate_pixel(&context, &mut pixel_state, 0).unwrap(), expected);
         }
         assert_eq!(expected, Value::Float(initial + 1.0));
         assert_eq!(variables["counter"], Value::Float(initial));
@@ -235,7 +235,7 @@ fn pixel_assignments_are_local_and_match_exported_evaluation() {
 
     let read_only = compile(&FunctionGraph::constant(Value::Float(0.5)), 7).unwrap();
     let context = EvaluationContext { scope: Default::default(), position: [0.5; 2], size: [1.0; 2], images: &[], tile: true, variables: &BTreeMap::new() };
-    assert_eq!(read_only.evaluate_pixel(&context, &mut pixel_state).unwrap(), Value::Float(0.5));
+    assert_eq!(read_only.evaluate_pixel(&context, &mut pixel_state, 0).unwrap(), Value::Float(0.5));
     assert!(pixel_state.variables().is_empty());
 }
 
@@ -252,6 +252,122 @@ fn pixel_random_seed_and_defined_variables_match_general_evaluation() {
     for variables in [BTreeMap::from([("$randomseed".into(), Value::Int(42)), ("known".into(), Value::Bool(true))]), BTreeMap::new()] {
         let context = EvaluationContext { scope: Default::default(), position: [0.5; 2], size: [1.0; 2], images: &[], tile: true, variables: &variables };
         let expected = program.evaluate(&context, &mut EvaluationState::default()).unwrap();
-        assert_eq!(program.evaluate_pixel(&context, &mut state).unwrap(), expected);
+        assert_eq!(program.evaluate_pixel(&context, &mut state, 0).unwrap(), expected);
     }
+}
+
+#[test]
+fn a_node_runs_once_so_readers_before_and_after_a_set_share_its_value() {
+    let mut graph = FunctionGraph::default();
+    let read = graph.add("get_integer1", &[], Some(Value::Text("count".into())));
+    let one = graph.add_constant(Value::Int(1));
+    let next = graph.add("add", &[read, one], None);
+    let store = graph.add("set", &[next], Some(Value::Text("count".into())));
+    graph.output = Some(graph.add("sequence", &[store, read], None));
+
+    let variables = BTreeMap::from([("count".to_string(), Value::Int(4))]);
+    assert_eq!(evaluate(&graph, &variables).unwrap(), Value::Int(4), "the Get node read 4 before the Set and keeps it");
+
+    // A second Get node reads the variable when it runs, after the Set
+    let later = graph.add("get_integer1", &[], Some(Value::Text("count".into())));
+    graph.output = Some(graph.add("sequence", &[store, later], None));
+    assert_eq!(evaluate(&graph, &variables).unwrap(), Value::Int(5));
+}
+
+#[test]
+fn a_loop_evaluates_its_condition_and_body_again_on_every_iteration() {
+    let mut graph = FunctionGraph::default();
+    let zero = graph.add_constant(Value::Int(0));
+    let start = graph.add("set", &[zero], Some(Value::Text("count".into())));
+    let read = graph.add("get_integer1", &[], Some(Value::Text("count".into())));
+    let limit = graph.add_constant(Value::Int(3));
+    let reached = graph.add("gteq", &[read, limit], None);
+    let one = graph.add_constant(Value::Int(1));
+    let next = graph.add("add", &[read, one], None);
+    let step = graph.add("set", &[next], Some(Value::Text("count".into())));
+    graph.output = Some(graph.add("while", &[start, reached, step], Some(Value::Int(100))));
+
+    assert_eq!(evaluate(&graph, &BTreeMap::new()).unwrap(), Value::Int(3));
+}
+
+#[test]
+fn variables_a_called_graph_sets_reach_its_caller_but_its_inputs_do_not() {
+    let mut called = FunctionGraph::default();
+    let input = called.add("get_integer1", &[], Some(Value::Text("amount".into())));
+    called.output = Some(called.add("set", &[input], Some(Value::Text("shared".into()))));
+
+    let mut caller = FunctionGraph::default();
+    let call = caller.add("instance", &[], None);
+    let node = caller.nodes.last_mut().unwrap();
+    node.instance = Some(materialcraft_core::GraphInstance {
+        label: String::new(),
+        package: String::new(),
+        graph: "called".into(),
+        inputs: vec![materialcraft_core::GraphPort { identifier: "amount".into(), type_code: 16 }],
+        outputs: vec![materialcraft_core::GraphPort { identifier: "output".into(), type_code: 16 }],
+        defaults: BTreeMap::from([("amount".to_string(), Value::Int(9))]),
+    });
+    node.inputs = vec![None];
+    node.source = Some(Ok(std::sync::Arc::new(called)));
+    let shared = caller.add("get_integer1", &[], Some(Value::Text("shared".into())));
+    caller.output = Some(caller.add("sequence", &[call, shared], None));
+    assert_eq!(evaluate(&caller, &BTreeMap::new()).unwrap(), Value::Int(9));
+
+    let leaked = caller.add("get_integer1", &[], Some(Value::Text("amount".into())));
+    caller.output = Some(caller.add("sequence", &[call, leaked], None));
+    assert!(evaluate(&caller, &BTreeMap::new()).unwrap_err().contains("undefined variable `amount`"));
+}
+
+#[test]
+fn a_drop_down_parameter_reads_as_the_integer_of_its_option() {
+    let mut graph = FunctionGraph::default();
+    let option = graph.add("get_integer1", &[], Some(Value::Text("mode".into())));
+    let two = graph.add_constant(Value::Int(2));
+    graph.output = Some(graph.add("gteq", &[option, two], None));
+
+    assert_eq!(evaluate(&graph, &BTreeMap::from([("mode".to_string(), Value::Enum(3))])).unwrap(), Value::Bool(true));
+}
+
+#[test]
+fn an_unconnected_input_computes_with_zero_and_a_loop_without_a_condition_runs_its_limit() {
+    let mut graph = FunctionGraph::default();
+    let high = graph.add_constant(Value::Float(8.0));
+    let half = graph.add_constant(Value::Float(0.5));
+    graph.output = Some(graph.add("lerp", &[high, high, half], None));
+    graph.nodes.last_mut().unwrap().inputs = vec![None, Some(high), Some(half)];
+    assert_eq!(evaluate(&graph, &BTreeMap::new()).unwrap(), Value::Float(4.0), "halfway between zero and 8");
+
+    let mut graph = FunctionGraph::default();
+    let zero = graph.add_constant(Value::Int(0));
+    let start = graph.add("set", &[zero], Some(Value::Text("count".into())));
+    let read = graph.add("get_integer1", &[], Some(Value::Text("count".into())));
+    let one = graph.add_constant(Value::Int(1));
+    let next = graph.add("add", &[read, one], None);
+    let step = graph.add("set", &[next], Some(Value::Text("count".into())));
+    graph.output = Some(graph.add("while", &[start, start, step], Some(Value::Int(3))));
+    graph.nodes.last_mut().unwrap().inputs = vec![Some(start), None, Some(step)];
+    assert_eq!(evaluate(&graph, &BTreeMap::new()).unwrap(), Value::Int(3));
+}
+
+#[test]
+fn booleans_compare_in_order() {
+    assert_eq!(operation("gt", &[Value::Bool(true), Value::Bool(false)], None).unwrap(), Value::Bool(true));
+    assert_eq!(operation("lreq", &[Value::Bool(true), Value::Bool(false)], None).unwrap(), Value::Bool(false));
+}
+
+#[test]
+fn every_pixel_of_a_processor_draws_its_own_random_numbers() {
+    let mut function = FunctionGraph::default();
+    let range = function.add_constant(Value::Float(1.0));
+    function.output = Some(function.add("rand", &[range], None));
+    let definition = crate::find("pixel_processor").unwrap();
+    let parameters = crate::resolve_params(definition, &BTreeMap::from([("function".into(), Value::Function(Box::new(function)))]));
+    let variables = BTreeMap::new();
+    let context = crate::CookContext { w: 8, h: 8, seed: 3, tile: true, inputs: &[], params: &parameters, resource: &|_| None, vars: &variables };
+
+    let image = (definition.cook)(&context).unwrap().remove(0);
+
+    let first = image.get(0, 0, false)[0];
+    let different = (0..8).flat_map(|y| (0..8).map(move |x| (x, y))).filter(|(x, y)| (image.get(*x, *y, false)[0] - first).abs() > 1e-4).count();
+    assert!(different > 56, "{different} of 64 pixels differ from the first");
 }

@@ -103,7 +103,13 @@ pub(super) const FILTERS: &[FilterMap] = &[
         sbs: "fxmaps",
         def: "fx_map",
         inputs: &[("background", "background"), ("inputpattern", "pattern0"), ("input", "pattern0")],
-        params: &[("colorswitch", "color_mode"), ("background", "background"), ("hurst", "roughness"), ("opacitymult", "opacity")],
+        params: &[
+            ("colorswitch", "color_mode"),
+            ("background", "background"),
+            ("hurst", "roughness"),
+            ("opacitymult", "opacity"),
+            ("renderroi", "render_region"),
+        ],
     },
 ];
 pub(super) const BASE_PARAMS: &[&str] = &["outputsize", "format", "randomseed", "tiling", "pixelsize", "pixelratio", "quality"];

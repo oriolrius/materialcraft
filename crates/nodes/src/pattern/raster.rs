@@ -18,10 +18,24 @@ pub(super) fn render(context: &CookContext, stamps: &[PatternStamp]) -> Result<I
     let pixels = Arc::make_mut(&mut image.data);
     let mut budget = MAX_SAMPLES;
 
+    // The render region is the part of pattern space the image shows, as left, right, top, bottom
+    let region = context.v4("render_region");
+    let origin = [region[0], region[2]];
+    let extent = [region[1] - region[0], region[3] - region[2]];
+    if extent.iter().any(|side| !side.is_finite() || side.abs() < 1e-6) {
+        return Err("the render region must have a width and a height".into());
+    }
+
     for stamp in stamps {
         if !stamp.center.iter().chain(&stamp.size).chain(&stamp.color).chain([&stamp.rotation, &stamp.variation]).all(|value| value.is_finite()) {
             return Err("pattern parameters must be finite".into());
         }
+
+        let stamp = &PatternStamp {
+            center: [(stamp.center[0] - origin[0]) / extent[0], (stamp.center[1] - origin[1]) / extent[1]],
+            size: [stamp.size[0] / extent[0], stamp.size[1] / extent[1]],
+            ..*stamp
+        };
         if stamp.size.iter().any(|size| size.abs() < 1e-8) {
             continue;
         }
@@ -61,7 +75,8 @@ pub(super) fn render(context: &CookContext, stamps: &[PatternStamp]) -> Result<I
             for x in left..right {
                 let delta = [(x as f32 + 0.5) / width as f32 - center[0], (y as f32 + 0.5) / height as f32 - center[1]];
                 let local = [(delta[0] * cosine + delta[1] * sine) * 2.0 / stamp.size[0], (-delta[0] * sine + delta[1] * cosine) * 2.0 / stamp.size[1]];
-                if local.iter().any(|coordinate| coordinate.abs() > 1.0) {
+                // The far edges belong to the neighbor, so a pixel on the seam of two patterns is drawn once
+                if local.iter().any(|coordinate| !(-1.0..1.0).contains(coordinate)) {
                     continue;
                 }
 

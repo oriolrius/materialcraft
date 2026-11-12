@@ -39,7 +39,8 @@ pub(crate) fn pixel_processor(context: &CookContext) -> CookResult {
                 variables: context.vars,
             };
 
-            let result = pixel(program.evaluate_pixel(&evaluation, state)?, gray)?;
+            let index = (y as u32).wrapping_mul(width).wrapping_add(x as u32);
+            let result = pixel(program.evaluate_pixel(&evaluation, state, index)?, gray)?;
             target.copy_from_slice(result.get(..channels).ok_or("invalid output channels")?);
         }
         Ok(())

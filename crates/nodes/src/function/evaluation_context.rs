@@ -19,6 +19,10 @@ impl EvaluationContext<'_> {
             return variable.resolve(self);
         }
 
-        Ok(local.get(name).or_else(|| self.variables.get(name)).cloned())
+        // A drop-down parameter reads as the integer of its chosen option
+        Ok(local.get(name).or_else(|| self.variables.get(name)).map(|value| match value {
+            Value::Enum(option) => Value::Int(i32::try_from(*option).unwrap_or(i32::MAX)),
+            value => value.clone(),
+        }))
     }
 }

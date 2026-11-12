@@ -50,10 +50,10 @@ pub(crate) fn evaluate(
     base: &BaseParameters,
     input: Option<ResolvedBaseParameters>,
     parent: ResolvedBaseParameters,
-    variables: &BTreeMap<String, Value>,
-) -> Result<(ResolvedBaseParameters, BTreeMap<BaseParameter, Value>), String> {
+    inherited: &BTreeMap<String, Value>,
+) -> Result<BaseEvaluation, String> {
     if base.functions.is_empty() {
-        return Ok((ResolvedBaseParameters::resolve(base, input, parent), BTreeMap::new()));
+        return Ok(BaseEvaluation { base: ResolvedBaseParameters::resolve(base, input, parent), values: BTreeMap::new(), variables: BTreeMap::new() });
     }
 
     // Evaluation mutates literals while borrowing the attached function graphs
@@ -73,7 +73,7 @@ pub(crate) fn evaluate(
         pixel_ratio_mode: base.pixel_ratio_mode,
     };
     let mut values = BTreeMap::new();
-    let mut variables = variables.clone();
+    let mut variables = inherited.clone();
     let mut resolved = ResolvedBaseParameters::resolve(&evaluated, input, parent);
 
     // Size and seed establish the context used by the remaining parameter functions
@@ -92,7 +92,7 @@ pub(crate) fn evaluate(
             } else {
                 resolved.size
             };
-            let value = crate::parameter_function::evaluate(function, parameter.value_type(), &variables, resolved.seed, size, false)
+            let value = crate::parameter_function::evaluate_keeping_variables(function, parameter.value_type(), &mut variables, resolved.seed, size, false)
                 .map_err(|error| format!("function of `{}`: {error}", parameter.identifier()))?;
             parameter.set_value(&mut evaluated, &value)?;
             parameter.set_inheritance(&mut evaluated, parameter.inheritance(base));
@@ -102,5 +102,14 @@ pub(crate) fn evaluate(
         values.insert(parameter, parameter.value(&evaluated));
     }
 
-    Ok((resolved, values))
+    variables.retain(|name, value| !name.starts_with('$') && inherited.get(name) != Some(value));
+    Ok(BaseEvaluation { base: resolved, values, variables })
+}
+
+/// What a node's base parameter functions resolved to
+pub(crate) struct BaseEvaluation {
+    pub(crate) base: ResolvedBaseParameters,
+    pub(crate) values: BTreeMap<BaseParameter, Value>,
+    /// User variables the functions set; the node's other functions read them
+    pub(crate) variables: BTreeMap<String, Value>,
 }

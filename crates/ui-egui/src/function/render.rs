@@ -41,7 +41,7 @@ pub(super) fn paint(app: &mut MaterialCraftApp, editor: &mut FunctionEditor, ui:
             .nodes
             .iter()
             .filter(|node| !selected_only || selected.contains(&node.id))
-            .map(|node| node_rect(node, app.ui.prefs.thumbnails))
+            .map(node_rect)
             .fold(Rect::NOTHING, |combined, bounds| combined.union(bounds));
         if !selected_only && let Some(document) = &document {
             for frame in &document.frames {
@@ -146,15 +146,13 @@ pub(super) fn paint(app: &mut MaterialCraftApp, editor: &mut FunctionEditor, ui:
         let body = ui.interact(screen_rect, ui.scope_id().with(("fn-node", id)), Sense::click_and_drag());
         crate::widgets::name(&body, egui::Role::Button, label);
 
-        if !dot && node.missing.is_none() && node.value.is_some() {
-            let content = node_card::body(screen_rect, editor.zoom).shrink(6.0 * editor.zoom);
-            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(content));
-            child.set_clip_rect(content.intersect(canvas_bounds));
-            if let Some(mut value) = node.value.clone()
-                && crate::value_editor::show(&mut child, &mut value)
-            {
-                values.push((id, value));
-            }
+        if !dot
+            && node.missing.is_none()
+            && super::node_face::editable(editor.zoom)
+            && let Some(mut value) = node.value.clone()
+            && super::node_face::edit(ui, node_card::body(screen_rect, editor.zoom), canvas_bounds, editor.zoom, &mut value)
+        {
+            values.push((id, value));
         }
 
         if (body.contains_pointer() && ui.input(|input| input.pointer.primary_pressed() && !input.modifiers.alt)) || body.secondary_clicked() {

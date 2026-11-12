@@ -79,6 +79,7 @@ pub(crate) fn evaluate(
             let ordering = match (left, right) {
                 (Value::Int(a), Value::Int(b)) => a.partial_cmp(b),
                 (Value::Float(a), Value::Float(b)) => a.partial_cmp(b),
+                (Value::Bool(a), Value::Bool(b)) => a.partial_cmp(b),
                 _ => return Err("comparison requires numeric inputs".into()),
             }
             .ok_or("cannot compare non-finite values")?;

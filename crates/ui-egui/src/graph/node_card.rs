@@ -7,16 +7,25 @@ const PORT_GAP: f32 = 18.0;
 const DOT_RADIUS: f32 = 7.0;
 /// Smallest on-screen side of a dot's grab area, in points
 const DOT_MIN_GRAB: f32 = 16.0;
+const CARD_COLOR: Color32 = Color32::from_rgb(0x1e, 0x20, 0x24);
+const WELL_COLOR: Color32 = Color32::from_rgb(0x14, 0x15, 0x18);
+
+/// Body height of a node that shows no preview and has at most one port a side
+const BARE_BODY_HEIGHT: f32 = 26.0;
 
 pub(crate) fn bounds(position: [f32; 2], inputs: usize, outputs: usize, previews: bool, dot: bool) -> Rect {
+    bounds_with_body(position, inputs, outputs, if previews { WIDTH } else { BARE_BODY_HEIGHT }, dot)
+}
+
+/// A card whose body is at least `body_height` tall and fits its ports
+pub(crate) fn bounds_with_body(position: [f32; 2], inputs: usize, outputs: usize, body_height: f32, dot: bool) -> Rect {
     let position = pos2(position[0], position[1]);
     if dot {
         return Rect::from_center_size(position, vec2(DOT_RADIUS * 2.0, DOT_RADIUS * 2.0));
     }
 
     let ports = inputs.max(outputs) as f32 * PORT_GAP + 8.0;
-    let body = if previews { WIDTH.max(ports) } else { ports.max(26.0) };
-    Rect::from_min_size(position, vec2(WIDTH, HEADER_HEIGHT + body + FOOTER_HEIGHT))
+    Rect::from_min_size(position, vec2(WIDTH, HEADER_HEIGHT + body_height.max(ports) + FOOTER_HEIGHT))
 }
 
 /// The on-screen area that picks up dot `bounds`: at least `DOT_MIN_GRAB` wide, so it stays easy to grab when zoomed out
@@ -46,11 +55,29 @@ pub(crate) fn body(bounds: Rect, zoom: f32) -> Rect {
 pub(crate) fn paint(painter: &Painter, bounds: Rect, zoom: f32, label: &str, color: Color32) {
     let radius = (5.0 * zoom).clamp(1.0, 6.0) as u8;
     let header = header(bounds, zoom);
-    painter.rect_filled(bounds, radius, Color32::from_rgb(0x1e, 0x20, 0x24));
+    painter.rect_filled(bounds, radius, CARD_COLOR);
     painter.rect_filled(header, CornerRadius { nw: radius, ne: radius, sw: 0, se: 0 }, color);
-    let font = FontId::proportional((10.5 * zoom).clamp(6.0, 16.0));
-    let title = crate::widgets::elided(painter, label, font.size, Color32::WHITE, header.width() - 8.0);
-    painter.galley(header.left_center() + vec2(4.0, -title.size().y * 0.5), title, Color32::WHITE);
+    painter.line_segment([header.left_bottom(), header.right_bottom()], Stroke::new(1.0, Color32::from_black_alpha(110)));
+
+    let font = FontId::proportional((11.0 * zoom).clamp(7.0, 16.0));
+    let title = crate::widgets::elided(painter, label, font.size, Color32::WHITE, header.width() - 10.0 * zoom);
+    painter.galley(header.left_center() + vec2(5.0 * zoom, -title.size().y * 0.5), title, Color32::WHITE);
+}
+
+/// The dark well a preview or a value sits in, inside `body`
+pub(crate) fn paint_well(painter: &Painter, well: Rect, zoom: f32) {
+    painter.rect_filled(well, (3.0 * zoom).clamp(1.0, 4.0) as u8, WELL_COLOR);
+}
+
+/// A short symbol or word centered in `body`, as large as its length allows
+pub(crate) fn paint_symbol(painter: &Painter, body: Rect, zoom: f32, symbol: &str, color: Color32) {
+    let size = match symbol.chars().count() {
+        0..=2 => 24.0,
+        3..=4 => 17.0,
+        _ => 13.0,
+    };
+    let text = crate::widgets::elided(painter, symbol, size * zoom, color, body.width() - 12.0 * zoom);
+    painter.galley(body.center() - text.size() * 0.5, text, color);
 }
 
 pub(crate) fn outline(painter: &Painter, bounds: Rect, zoom: f32, stroke: Stroke) {

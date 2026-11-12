@@ -1,4 +1,4 @@
-use super::node_style::{PORT_RADIUS, header_color, node_label, node_rect, port_color};
+use super::node_style::{PORT_RADIUS, header_color, node_label, node_rect, port_color, shows_preview};
 use super::{GraphCamera, GraphDrag, PortHit, WireRef};
 use super::{
     navigation::frame,
@@ -84,7 +84,7 @@ fn canvas(app: &mut MaterialCraftApp, ui: &mut Ui) {
     let mut layouts: Vec<NodeLayout> = Vec::with_capacity(graph.nodes.len());
     for node in &graph.nodes {
         let (ins, outs) = materialcraft_engine::eval::ports_with_connections(&app.session.pkg, node, index.incoming(node.id).iter().copied());
-        let mut r = node_rect(node, ins.len(), outs.len(), show_thumbnails);
+        let mut r = node_rect(node, ins.len(), outs.len(), show_thumbnails && shows_preview(&outs));
         if selection.contains(&node.id) && node_delta.length() > 0.5 {
             let position = materialcraft_engine::graph_grid::translate(node.pos, node_delta.into(), app.ui.prefs.snap_to_grid);
             r = r.translate(vec2(position[0] - node.pos[0], position[1] - node.pos[1]));
@@ -184,7 +184,6 @@ fn canvas(app: &mut MaterialCraftApp, ui: &mut Ui) {
     app.graph.wires = wires;
 
     // Nodes
-    let font = FontId::proportional((10.5 * camera.zoom).clamp(6.0, 16.0));
     let small = FontId::proportional((9.0 * camera.zoom).clamp(5.5, 13.0));
     let mut node_responses: Vec<(NodeId, egui::Response)> = Vec::new();
     let mut dot_grabs: Vec<Rect> = Vec::new();
@@ -218,18 +217,16 @@ fn canvas(app: &mut MaterialCraftApp, ui: &mut Ui) {
             {
                 let side = body.width().min(body.height()) - 6.0 * camera.zoom;
                 let tr_ = Rect::from_center_size(body.center(), vec2(side, side));
+                node_card::paint_well(&painter, tr_.expand(camera.zoom), camera.zoom);
                 let tex = app.thumbs.node(&ctx, r0.key, 0, img);
                 painter.image(tex, tr_, Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), if node.disabled { Color32::from_gray(90) } else { Color32::WHITE });
             } else if let Some(value) = result.and_then(|result| result.outputs.first()).and_then(materialcraft_engine::eval::NodeOutput::as_value) {
-                let text = match value {
-                    materialcraft_engine::core::Value::Float(value) => value.to_string(),
-                    _ => serde_json::to_value(value).ok().and_then(|value| value.get("v").map(ToString::to_string)).unwrap_or_default(),
-                };
-
-                let text = crate::widgets::elided(&painter, text, font.size, theme.text, body.width() - 8.0);
-                painter.galley(body.center() - text.size() * 0.5, text, theme.text);
+                node_card::paint_well(&painter, body.shrink(4.0 * camera.zoom), camera.zoom);
+                node_card::paint_symbol(&painter, body, camera.zoom, &super::value_text::value_text(value), theme.text_strong);
+            } else if error.is_some() {
+                node_card::paint_symbol(&painter, body, camera.zoom, icon::WARNING, theme.danger);
             } else if result.is_none() {
-                painter.text(body.center(), Align2::CENTER_CENTER, icon::HOURGLASS_MEDIUM, small.clone(), theme.text_dim);
+                node_card::paint_symbol(&painter, body, camera.zoom, icon::HOURGLASS_MEDIUM, theme.text_dim);
             }
             // Footer: size and format
             let footer = Rect::from_min_max(pos2(screen_rect.left(), body.bottom()), screen_rect.max);

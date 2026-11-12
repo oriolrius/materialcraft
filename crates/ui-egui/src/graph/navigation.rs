@@ -1,4 +1,4 @@
-use super::{NODE_W, node_rect};
+use super::{NODE_W, node_rect, shows_preview};
 use crate::MaterialCraftApp;
 use egui::{Pos2, Rect, pos2, vec2};
 use serde_json::json;
@@ -42,7 +42,7 @@ pub(super) fn frame(app: &mut MaterialCraftApp, view: Rect, only_selection: bool
         }
 
         let (inputs, outputs) = materialcraft_engine::eval::ports(&app.session.pkg, g, n);
-        r = r.union(node_rect(n, inputs.len(), outputs.len(), thumbs));
+        r = r.union(node_rect(n, inputs.len(), outputs.len(), thumbs && shows_preview(&outputs)));
     }
     for f in &g.frames {
         if !only_selection {

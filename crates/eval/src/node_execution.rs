@@ -83,7 +83,13 @@ pub(crate) fn cook_node(
 
     let input_base = prepared.input_base(node.id, cooked);
     let (mut base, base_values, base_error) = match crate::resolved_base_parameters::evaluate(&node.base, input_base, prepared.parent_base, &variables) {
-        Ok((base, values)) => (base, values, None),
+        Ok(evaluation) => {
+            if !evaluation.variables.is_empty() {
+                variables.to_mut().extend(evaluation.variables);
+            }
+
+            (evaluation.base, evaluation.values, None)
+        }
         Err(error) => (crate::ResolvedBaseParameters::resolve(&node.base, input_base, prepared.parent_base), BTreeMap::new(), Some(error)),
     };
     if node.disabled
