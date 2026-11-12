@@ -4,7 +4,6 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod convert;
-mod font;
 mod layout;
 mod references;
 mod resources;
@@ -97,9 +96,14 @@ fn main() -> Result<()> {
     let mut assets = Vec::new();
     for key in needed {
         let recipe = resources::recipe(key)?;
-        let bytes = resources::generate(key)?;
+        let bytes = resources::load(key)?;
         assets.push(serde_json::json!({"path": recipe.path, "recipe": recipe.description, "bytes": bytes.len()}));
         outputs.insert(recipe.path.into(), bytes);
+        for notice in resources::notices(key) {
+            let path = format!("resources/{notice}");
+            let bytes = materialcraft_formats::sbs::library::read(&format!("sbs://{path}"))?;
+            outputs.insert(path, bytes);
+        }
     }
     // Validate the complete dependency closure before writing any package or asset.
     let available = outputs.keys().cloned().chain(std::iter::once("functions.sbs".into())).collect();
@@ -139,6 +143,6 @@ fn main() -> Result<()> {
         "resources": assets, "packages": reports,
     });
     materialcraft_formats::write_atomic(Path::new(report), &serde_json::to_vec_pretty(&report_data)?)?;
-    eprintln!("Converted {} packages and generated {} resources. Existing functions.sbs unchanged.", reports.len(), assets.len());
+    eprintln!("Converted {} packages and loaded {} resources. Existing functions.sbs unchanged.", reports.len(), assets.len());
     Ok(())
 }

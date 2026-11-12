@@ -27,15 +27,20 @@ pub(crate) fn cook(context: &CookContext) -> CookResult {
 
     let mut pending = Vec::new();
     if let Some(root) = graph.root {
-        pending.push(PatternVisit { node: root, center: [0.5; 2], extent: 1.0, depth: 0, number: 0, seed: context.seed, variables: context.vars.clone() });
+        pending.push(PatternVisit { node: root, center: [0.5; 2], extent: 1.0, depth: 0, number: 0, seed: context.seed });
     }
 
     let mut stamps = Vec::new();
+    // Set variables belong to this FX-Map cook. In particular, iterations must see
+    // preceding iterations' assignments rather than resetting to the iterator's initial state.
+    let mut variables = context.vars.clone();
+    let mut max_depth = 0;
     let mut state = EvaluationState::default();
     let mut remaining = MAX_VISITS;
     while let Some(mut visit) = pending.pop() {
         remaining = remaining.checked_sub(1).ok_or("pattern graph exceeded its execution budget")?;
         let node = nodes.get(&visit.node).ok_or("missing pattern node")?;
+        max_depth = max_depth.max(visit.depth);
         if node.kind == PatternNodeKind::Dot {
             if let Some(Some(child)) = node.children.first() {
                 visit.node = *child;
@@ -48,12 +53,13 @@ pub(crate) fn cook(context: &CookContext) -> CookResult {
         if node.parameters.get("randominherited").and_then(Value::as_bool) == Some(false) {
             visit.seed = node.parameters.get("randomseed").and_then(Value::as_i32).unwrap_or(0) as u32;
         }
-        visit.variables.insert("$randomseed".into(), Value::Int(visit.seed as i32));
-        visit.variables.insert("$depth".into(), Value::Float(visit.depth as f32));
-        visit.variables.insert("$depthpow2".into(), Value::Float(visit.extent));
-        visit.variables.insert("$number".into(), Value::Float(visit.number as f32));
+        variables.insert("$randomseed".into(), Value::Int(visit.seed as i32));
+        variables.insert("$depth".into(), Value::Float(visit.depth as f32));
+        variables.insert("$depthpow2".into(), Value::Float(visit.extent));
+        variables.insert("$number".into(), Value::Float(visit.number as f32));
 
         let mut parameters = BTreeMap::new();
+        let mut random = visit.seed;
         for parameter in &definition.params {
             let value = match functions.get(&(node.id, parameter.id)) {
                 Some(program) => {
@@ -63,11 +69,11 @@ pub(crate) fn cook(context: &CookContext) -> CookResult {
                         size: [context.w as f32, context.h as f32],
                         images: context.inputs.get(1..).unwrap_or(&[]),
                         tile: context.tile,
-                        variables: &visit.variables,
+                        variables: &variables,
                     };
 
-                    let value = program.evaluate(&evaluation, &mut state)?;
-                    visit.variables.clone_from(state.variables());
+                    let value = program.evaluate_with_random(&evaluation, &mut state, &mut random)?;
+                    variables.extend(state.assignments().clone());
                     value
                 }
                 None => node.parameters.get(parameter.id).unwrap_or(&parameter.default).clone(),
@@ -79,6 +85,7 @@ pub(crate) fn cook(context: &CookContext) -> CookResult {
         let scalar = |name: &str| parameters.get(name).and_then(Value::as_f32).unwrap_or(0.0);
         let integer = |name: &str| parameters.get(name).and_then(Value::as_i32).unwrap_or(0);
         let vector = |name: &str| parameters.get(name).and_then(Value::as_vec4).map(|value| [value[0], value[1]]).unwrap_or([0.0; 2]);
+        visit.seed = random;
         if parameters.get("randominherited").and_then(Value::as_bool) == Some(false) {
             visit.seed = integer("randomseed") as u32;
         }
@@ -119,6 +126,8 @@ pub(crate) fn cook(context: &CookContext) -> CookResult {
                         child_visit.node = *child;
                         child_visit.depth = visit.depth.saturating_add(1);
                         child_visit.extent *= 0.5;
+                        // Repeated children need distinct streams even when their parent consumes no random values.
+                        child_visit.seed = crate::random::hash(visit.seed.wrapping_add(slot as u32 + 1));
                         child_visit.center = [
                             visit.center[0] + (if slot & 1 == 0 { -0.25 } else { 0.25 }) * visit.extent,
                             visit.center[1] + (if slot & 2 == 0 { -0.25 } else { 0.25 }) * visit.extent,
@@ -143,6 +152,7 @@ pub(crate) fn cook(context: &CookContext) -> CookResult {
                     let mut first = visit.clone();
                     first.node = *child;
                     first.number = 0;
+                    first.seed = crate::random::hash(visit.seed.wrapping_add(1));
                     children.push(first);
                 }
                 if let Some(Some(child)) = node.children.get(1) {
@@ -150,6 +160,7 @@ pub(crate) fn cook(context: &CookContext) -> CookResult {
                         let mut repeated = visit.clone();
                         repeated.node = *child;
                         repeated.number = number as u32;
+                        repeated.seed = crate::random::hash(visit.seed.wrapping_add(number as u32 + 2));
                         children.push(repeated);
                     }
                 }
@@ -162,5 +173,5 @@ pub(crate) fn cook(context: &CookContext) -> CookResult {
         pending.extend(children.into_iter().rev());
     }
 
-    Ok(vec![raster::render(context, &stamps)?])
+    Ok(vec![raster::render(context, &stamps, max_depth)?])
 }

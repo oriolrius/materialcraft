@@ -68,6 +68,39 @@ fn processor_tiling_variable_tracks_both_axes_and_invalidates_cached_values() {
 }
 
 #[test]
+fn base_parameter_assignments_reach_pixel_functions_without_leaking_to_other_nodes() {
+    use materialcraft_core::{BaseParameter, FunctionGraph};
+    let mut init = FunctionGraph::default();
+    let value = init.add_constant(Value::Float(0.375));
+    let assign = init.add("set", &[value], Some(Value::Text("prepared_value".into())));
+    let size = init.add_constant(Value::Int2([0; 2]));
+    init.output = Some(init.add("sequence", &[assign, size], None));
+    let mut function = FunctionGraph::default();
+    function.output = Some(function.add("get_float1", &[], Some(Value::Text("prepared_value".into()))));
+    let mut graph = Graph::new("Parameter scope");
+    graph.size = [4; 2];
+    let initialized = graph.add_node("pixel_processor", [0.0; 2]);
+    let isolated = graph.add_node("pixel_processor", [100.0; 2]);
+    for id in [initialized, isolated] {
+        graph.node_mut(id).unwrap().params.insert("function".into(), Value::Function(Box::new(function.clone())));
+        graph.node_mut(id).unwrap().params.insert("color_mode".into(), Value::Bool(false));
+    }
+    graph.node_mut(initialized).unwrap().base.functions.insert(BaseParameter::OutputSize, init);
+    let mut package = Package::new("Parameter scope");
+    package.graphs.push(graph);
+    let cache = Mutex::new(Cache::default());
+    for expected in [0.375, 0.625] {
+        package.graphs[0].node_mut(initialized).unwrap().base.functions.get_mut(&BaseParameter::OutputSize).unwrap().nodes[0].value =
+            Some(Value::Float(expected));
+        let cooked = cook(&package, 0, &Options::new(&no_res), &cache);
+        assert_eq!(cooked.nodes[&initialized].error, None);
+        assert!(!cooked.nodes[&initialized].cached);
+        assert!((cooked.image(initialized, 0).unwrap().mean()[0] - expected).abs() < 1e-6);
+        assert!(cooked.nodes[&isolated].error.as_deref().unwrap().contains("undefined variable `prepared_value`"));
+    }
+}
+
+#[test]
 fn hostile_param_is_clamped_before_cooking() {
     let (mut p, noise, _, _) = sample();
     let blur = p.graphs[0].add_node("directional_blur", [150.0, 100.0]);

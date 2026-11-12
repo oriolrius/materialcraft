@@ -27,7 +27,7 @@ pub(crate) fn evaluate(
             return Err("constant has the wrong type".into());
         }
 
-        return Ok(value);
+        return value_type::canonical(value);
     }
 
     if op.starts_with("get_") {
@@ -38,7 +38,7 @@ pub(crate) fn evaluate(
             return Err(format!("variable `{name}` has the wrong type for {op}"));
         }
 
-        return Ok(value);
+        return value_type::canonical(value);
     }
 
     if op.starts_with("to") || op.contains("vector") || op.contains("swizzle") {

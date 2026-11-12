@@ -165,13 +165,14 @@ pub fn package(text: &str, name: &str, identities: &BTreeMap<String, String>) ->
                 let recipe = resources::recipe(key)?;
                 if let Some(original) = xml::value(node, "filepath").and_then(|path| path.rsplit('/').next()).filter(|name| !name.is_empty()) {
                     let output = std::path::Path::new(recipe.path);
-                    if std::path::Path::new(original).file_stem() != output.file_stem() {
+                    let font_replacement = original.eq_ignore_ascii_case("cour.ttf") && recipe.key == "courier_new";
+                    if !font_replacement && std::path::Path::new(original).file_stem() != output.file_stem() {
                         return Err(format!("{name}: resource `{key}` would change its filename stem").into());
                     }
                     let extension = std::path::Path::new(original).extension();
                     // Surface inputs are replaced with a standard image container;
-                    // every other resource keeps its original filename and extension.
-                    if extension != Some(std::ffi::OsStr::new("surface")) && extension != output.extension() {
+                    // the requested font substitute is the only filename-stem exception.
+                    if !font_replacement && extension != Some(std::ffi::OsStr::new("surface")) && extension != output.extension() {
                         return Err(format!("{name}: resource `{key}` would change its extension").into());
                     }
                 }

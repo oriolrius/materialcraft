@@ -9,6 +9,7 @@ pub struct EvaluationState {
     pub(crate) values: Vec<Value>,
     pub(crate) registers: Vec<Option<Value>>,
     pub(crate) variables: BTreeMap<String, Value>,
+    pub(crate) assignments: BTreeMap<String, Value>,
     pub(crate) random: u32,
     pub(crate) calls: BTreeMap<usize, EvaluationState>,
 }
@@ -16,5 +17,10 @@ pub struct EvaluationState {
 impl EvaluationState {
     pub fn variables(&self) -> &BTreeMap<String, Value> {
         &self.variables
+    }
+
+    /// Explicit Set results, excluding inherited values and function arguments.
+    pub fn assignments(&self) -> &BTreeMap<String, Value> {
+        &self.assignments
     }
 }

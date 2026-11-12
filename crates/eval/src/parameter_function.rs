@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 pub(crate) fn evaluate(
     function: &FunctionGraph,
     expected: ValueType,
-    variables: &BTreeMap<String, Value>,
+    variables: &mut BTreeMap<String, Value>,
     seed: u32,
     size: [u32; 2],
     allow_scalar: bool,
@@ -17,7 +17,8 @@ pub(crate) fn evaluate(
     }
 
     let context = EvaluationContext { scope: Default::default(), position: [0.5; 2], size: size.map(|side| side as f32), images: &[], tile: true, variables };
-    let value = program.evaluate(&context, &mut EvaluationState::default())?;
+    let mut state = EvaluationState::default();
+    let value = program.evaluate(&context, &mut state)?;
     let finite = match &value {
         Value::Float(value) => value.is_finite(),
         Value::Float2(values) => values.iter().all(|value| value.is_finite()),
@@ -28,6 +29,8 @@ pub(crate) fn evaluate(
     if !finite {
         return Err("function returned a non-finite value".into());
     }
+
+    variables.extend(state.assignments().clone());
 
     Ok(value)
 }

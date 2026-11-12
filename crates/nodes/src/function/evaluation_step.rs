@@ -2,6 +2,7 @@ use materialcraft_core::Value;
 
 pub(crate) enum EvaluationStep {
     Enter(usize),
+    Store(usize),
     Apply { instruction: usize, base: usize },
     Branch(usize),
     Sequence(usize),

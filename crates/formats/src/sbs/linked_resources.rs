@@ -28,7 +28,7 @@ pub(super) fn read(reader: &mut SbsReader<'_, '_>, content: Node<'_, '_>, pkg: &
     let mut needed: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for parameter in content
         .descendants()
-        .filter(|node| node.has_tag_name("parameter") && matches!(child_value(*node, "name"), Some("bitmapresourcepath" | "vectorresourcepath")))
+        .filter(|node| node.has_tag_name("parameter") && matches!(child_value(*node, "name"), Some("bitmapresourcepath" | "vectorresourcepath" | "fontdata")))
     {
         let Some(url) = child_element(parameter, "paramValue").and_then(|value| child_value(value, "constantValueString")) else { continue };
         let (path, dependency) = reader.resolve_reference(url);

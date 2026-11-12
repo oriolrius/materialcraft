@@ -115,7 +115,13 @@ pub fn read(bytes: &[u8], identity: &str) -> Result<sbs::SbsRead> {
         }
 
         let content = files.get(&file).ok_or_else(|| bad(format!("Missing archived package `{file}`")))?;
-        let reader = |reference: &str| resolve(&file, reference).ok().and_then(|path| files.get(&path).cloned());
+        let reader = |reference: &str| {
+            if reference.starts_with("sbs://") {
+                sbs::library::read(reference).ok()
+            } else {
+                resolve(&file, reference).ok().and_then(|path| files.get(&path).cloned())
+            }
+        };
         let mut read = sbs::read_sbs(content, &file, &reader)?;
 
         warnings.append(&mut read.warnings);

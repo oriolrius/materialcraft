@@ -78,9 +78,9 @@ fn references_are_relative_portable_and_confined_to_the_library() {
 #[test]
 fn resource_names_survive_and_surface_replacements_declare_their_actual_formats() {
     for (key, original, expected, format) in [
-        ("courier_new", "cour.ttf", "cour.ttf", "ttf"),
+        ("courier_new", "cour.ttf", "cursor.otf", "otf"),
         ("moss01_bmp", "moss01_bmp.bmp", "moss01_bmp.bmp", "bmp"),
-        ("bluenoise_256_c", "bluenoise_256_c.surface", "bluenoise_256_c.png", "png"),
+        ("bluenoise_256_c", "bluenoise_256_c.surface", "bluenoise_256_c.exr", "exr"),
         ("shuf4_64_32", "shuf4_64_32.surface", "shuf4_64_32.exr", "exr"),
         ("sun", "sun.surface", "sun.exr", "exr"),
     ] {
@@ -93,34 +93,24 @@ fn resource_names_survive_and_surface_replacements_declare_their_actual_formats(
 }
 
 #[test]
-fn lookup_substitutes_have_declared_shapes_channels_and_uniform_ranks() {
-    let permutation = image::load_from_memory(&resources::generate("perm").unwrap()).unwrap().into_luma16();
+fn generated_permutation_has_uniform_ranks_and_blue_noise_has_the_expected_shape() {
+    let permutation = image::load_from_memory(&resources::load("perm").unwrap()).unwrap().into_luma16();
     assert_eq!(permutation.dimensions(), (1024, 16));
     for row in permutation.as_raw().as_chunks::<1024>().0.iter() {
         assert_eq!(row.iter().collect::<BTreeSet<_>>().len(), 1024);
         assert_eq!(row.iter().copied().min(), Some(0));
         assert_eq!(row.iter().copied().max(), Some(u16::MAX));
     }
-    let noise = resources::generate("bluenoise_256").unwrap();
-    assert_eq!(noise, resources::generate("bluenoise_256").unwrap());
+    let noise = resources::load("bluenoise_256").unwrap();
+    assert_eq!(noise, resources::load("bluenoise_256").unwrap());
     let noise = image::load_from_memory(&noise).unwrap().into_luma16();
     assert_eq!(noise.dimensions(), (256, 256));
-    assert_eq!(noise.as_raw().iter().collect::<BTreeSet<_>>().len(), 65536);
-    let shuffled = image::load_from_memory(&resources::generate("shuf4_64_32").unwrap()).unwrap().into_rgba32f();
-    assert_eq!(shuffled.dimensions(), (64, 32));
-    for channel in 0..4 {
-        let mut values: Vec<_> = shuffled.pixels().map(|p| p.0[channel]).collect();
-        values.sort_by(f32::total_cmp);
-        for (index, value) in values.into_iter().enumerate() {
-            assert_eq!(value, (index as f32 + 0.5) / 2048.0);
-        }
-    }
 }
 
 #[test]
-fn generated_art_is_decodable_and_source_assets_are_not_needed() {
+fn library_art_is_decodable_without_reading_source_assets() {
     for key in ["DoorFrame", "scratched_metal", "leather", "scratch_damage", "moss01_bmp", "sun", "bluenoise_256_c"] {
-        let bytes = resources::generate(key).unwrap();
+        let bytes = resources::load(key).unwrap();
         let image = materialcraft_formats::decode(&bytes, true).unwrap();
         assert!(image.w > 0 && image.h > 0);
         assert!(image.data.iter().all(|value| value.is_finite()));
@@ -131,25 +121,19 @@ fn generated_art_is_decodable_and_source_assets_are_not_needed() {
 }
 
 #[test]
-fn original_font_has_valid_sfnt_checksum_and_numeric_character_mapping() {
-    let bytes = font::generate().unwrap();
-    assert_eq!(bytes, font::generate().unwrap());
-    assert_eq!(&bytes[..4], &[0, 1, 0, 0]);
-    let checksum = bytes.chunks(4).fold(0_u32, |sum, c| {
-        let mut b = [0; 4];
-        b[..c.len()].copy_from_slice(c);
-        sum.wrapping_add(u32::from_be_bytes(b))
-    });
-    assert_eq!(checksum, 0xb1b0afba);
-    let count = u16::from_be_bytes(bytes[4..6].try_into().unwrap()) as usize;
-    let mut tags = BTreeSet::new();
-    for entry in bytes[12..12 + count * 16].as_chunks::<16>().0.iter() {
-        let offset = u32::from_be_bytes(entry[8..12].try_into().unwrap()) as usize;
-        let length = u32::from_be_bytes(entry[12..16].try_into().unwrap()) as usize;
-        assert!(bytes.get(offset..offset + length).is_some());
-        assert!(tags.insert(&entry[..4]));
+fn curated_resources_keep_the_supplied_bytes_and_required_notices() {
+    for key in ["bluenoise_256", "bluenoise_256_c", "sun", "shuf4_64_32", "courier_new", "scratch_damage", "leather", "scratched_metal", "moss01_bmp"] {
+        let recipe = resources::recipe(key).unwrap();
+        let bytes = resources::load(key).unwrap();
+        let supplied = materialcraft_formats::sbs::library::read(&format!("sbs://{}", recipe.path)).unwrap();
+        assert!(bytes == supplied, "converter replaced the supplied bytes for {key}");
+        assert!(!resources::notices(key).is_empty(), "missing license notice for {key}");
+        for notice in resources::notices(key) {
+            assert!(!materialcraft_formats::sbs::library::read(&format!("sbs://resources/{notice}")).unwrap().is_empty());
+        }
     }
-    for required in [b"head", b"cmap", b"glyf", b"loca", b"hmtx", b"maxp"] {
-        assert!(tags.contains(required.as_slice()));
-    }
+    assert!(resources::load("courier_new").unwrap().starts_with(b"OTTO"));
+    let shuffled = image::load_from_memory(&resources::load("shuf4_64_32").unwrap()).unwrap().into_rgba32f();
+    assert_eq!(shuffled.dimensions(), (64, 32));
+    assert!(shuffled.as_raw().iter().all(|v| v.is_finite()));
 }

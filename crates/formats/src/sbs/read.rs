@@ -37,6 +37,7 @@ pub fn read_sbs(bytes: &[u8], name: &str, linked: &dyn Fn(&str) -> Option<Vec<u8
         graph_names: HashMap::new(),
         resource_names: HashMap::new(),
         external_resource_names: HashMap::new(),
+        direct_resource_names: HashMap::new(),
         node_count: 0,
     };
     for dependency in child_element(root, "dependencies").into_iter().flat_map(|d| children_named(d, "dependency")) {
@@ -53,6 +54,7 @@ pub fn read_sbs(bytes: &[u8], name: &str, linked: &dyn Fn(&str) -> Option<Vec<u8
     if let Some(content) = content {
         reader.collect_items(content, "", &mut pkg, &mut graph_elements, linked);
         super::linked_resources::read(&mut reader, content, &mut pkg, linked);
+        super::resource_replacement::read_direct(&mut reader, content, &mut pkg, linked);
     }
 
     // Name every graph first so instances can refer to graphs defined later in the file

@@ -47,6 +47,8 @@ pub fn validate(document: &Graph, target: &FunctionGraphTarget, function: &Funct
         FunctionGraphTarget::Dynamic { node, parameter } => {
             document.node(*node).is_ok_and(|node| materialcraft_nodes::accepts_scalar_function(&node.def, parameter))
         }
+        // Quadrant luminosity functions may return one channel or an RGBA value.
+        FunctionGraphTarget::Pattern { parameter, .. } => parameter == "opacity",
         _ => false,
     };
     if actual != expected && !(scalar_channel && expected == ValueType::Float4 && actual == ValueType::Float) {

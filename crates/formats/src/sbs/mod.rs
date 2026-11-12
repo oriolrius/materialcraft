@@ -50,3 +50,4 @@ mod write;
 mod preview_binding;
 
 mod resource;
+mod resource_replacement;

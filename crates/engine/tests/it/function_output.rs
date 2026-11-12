@@ -48,6 +48,34 @@ fn selecting_an_output_checks_the_target_parameter_type() {
 }
 
 #[test]
+fn pattern_luminosity_accepts_scalar_and_float4_but_rejects_other_types() {
+    let (mut session, target) = target_session("pattern");
+    let FunctionGraphTarget::Pattern { owner, node, .. } = target else { panic!("expected pattern target") };
+    let target = FunctionGraphTarget::Pattern { owner, node, parameter: "opacity".into() };
+    let Some(Value::PatternGraph(pattern)) = session.graph_mut().unwrap().node_mut(owner).unwrap().params.get_mut("pattern") else {
+        panic!("expected pattern")
+    };
+    pattern.nodes[0].parameters.clear();
+    pattern.nodes[0].parameters.insert("opacity".into(), Value::Function(Box::default()));
+    for color in [false, true] {
+        session.graph_mut().unwrap().node_mut(owner).unwrap().params.insert("color_mode".into(), Value::Bool(color));
+        for value in [Value::Float(0.5), Value::Float4([0.5; 4])] {
+            let function = FunctionGraph::constant(value);
+            let output = function.output.unwrap();
+            execute(&mut session, "graph.function.set", &json!({"target": target, "function": function})).unwrap();
+            execute(&mut session, "graph.function.edit", &json!({"target": target, "edit": {"action": "output", "id": output}})).unwrap();
+            assert!(materialcraft_engine::function_inspection::warnings(session.graph().unwrap()).is_empty());
+        }
+        for value in [Value::Float2([0.5; 2]), Value::Int(1)] {
+            let function = FunctionGraph::constant(value);
+            let output = function.output.unwrap();
+            execute(&mut session, "graph.function.set", &json!({"target": target, "function": function})).unwrap();
+            assert!(execute(&mut session, "graph.function.edit", &json!({"target": target, "edit": {"action": "output", "id": output}})).is_err());
+        }
+    }
+}
+
+#[test]
 fn mismatched_existing_outputs_warn_and_remain_editable() {
     let (mut session, target) = target_session("dynamic");
     let function = FunctionGraph::constant(Value::Float3([0.5; 3]));

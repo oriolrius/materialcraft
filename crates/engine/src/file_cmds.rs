@@ -142,7 +142,7 @@ pub fn is_mcraft(path: &str) -> bool {
 }
 
 pub fn open_bytes(session: &mut Session, bytes: &[u8], name: Option<String>) -> Result<()> {
-    open_bytes_linked(session, bytes, name, &|_| None)
+    open_bytes_linked(session, bytes, name, &|reference| materialcraft_formats::sbs::library::read(reference).ok())
 }
 
 pub fn open_bytes_linked(session: &mut Session, bytes: &[u8], name: Option<String>, linked: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<()> {

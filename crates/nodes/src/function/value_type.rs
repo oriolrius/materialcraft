@@ -1,5 +1,13 @@
 use materialcraft_core::Value;
 
+pub fn canonical(value: Value) -> Result<Value, String> {
+    Ok(match value {
+        Value::Enum(value) => Value::Int(i32::try_from(value).map_err(|_| "choice value exceeds the signed integer range")?),
+        Value::Color(value) => Value::Float4(value),
+        value => value,
+    })
+}
+
 pub fn type_code(value: &Value) -> u32 {
     materialcraft_core::ValueType::of(value).map_or(0, |value_type| value_type as u32)
 }

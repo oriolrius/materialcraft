@@ -50,7 +50,7 @@ pub(crate) fn evaluate(
     base: &BaseParameters,
     input: Option<ResolvedBaseParameters>,
     parent: ResolvedBaseParameters,
-    variables: &BTreeMap<String, Value>,
+    variables: &mut std::borrow::Cow<'_, BTreeMap<String, Value>>,
 ) -> Result<(ResolvedBaseParameters, BTreeMap<BaseParameter, Value>), String> {
     if base.functions.is_empty() {
         return Ok((ResolvedBaseParameters::resolve(base, input, parent), BTreeMap::new()));
@@ -73,7 +73,6 @@ pub(crate) fn evaluate(
         pixel_ratio_mode: base.pixel_ratio_mode,
     };
     let mut values = BTreeMap::new();
-    let mut variables = variables.clone();
     let mut resolved = ResolvedBaseParameters::resolve(&evaluated, input, parent);
 
     // Size and seed establish the context used by the remaining parameter functions
@@ -86,13 +85,13 @@ pub(crate) fn evaluate(
         BaseParameter::Tiling,
     ] {
         if let Some(function) = base.functions.get(&parameter) {
-            resolved.variables(&mut variables);
+            resolved.variables(variables.to_mut());
             let size = if parameter == BaseParameter::OutputSize && parameter.inheritance(base) != ParameterInheritance::Absolute {
                 parameter.inheritance(base).resolve(parent.size, input.map(|base| base.size), parent.size)
             } else {
                 resolved.size
             };
-            let value = crate::parameter_function::evaluate(function, parameter.value_type(), &variables, resolved.seed, size, false)
+            let value = crate::parameter_function::evaluate(function, parameter.value_type(), variables.to_mut(), resolved.seed, size, false)
                 .map_err(|error| format!("function of `{}`: {error}", parameter.identifier()))?;
             parameter.set_value(&mut evaluated, &value)?;
             parameter.set_inheritance(&mut evaluated, parameter.inheritance(base));

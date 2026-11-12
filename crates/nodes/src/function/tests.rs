@@ -255,3 +255,168 @@ fn pixel_random_seed_and_defined_variables_match_general_evaluation() {
         assert_eq!(program.evaluate_pixel(&context, &mut state).unwrap(), expected);
     }
 }
+
+#[test]
+fn function_calls_consume_the_callers_random_stream() {
+    let mut random = FunctionGraph::default();
+    let one = random.add_constant(Value::Float(1.0));
+    let first = random.add("rand", &[one], None);
+    random.output = Some(first);
+    let source = std::sync::Arc::new(random.clone());
+    let second = random.add("rand", &[one], None);
+    random.output = Some(random.add("vector2", &[first, second], None));
+
+    let mut caller = FunctionGraph::default();
+    let mut calls = Vec::new();
+    for _ in 0..2 {
+        calls.push(caller.add("instance", &[], None));
+        let node = caller.nodes.last_mut().unwrap();
+        node.instance = Some(materialcraft_core::GraphInstance {
+            label: String::new(),
+            package: String::new(),
+            graph: "random".into(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            defaults: BTreeMap::new(),
+        });
+        node.source = Some(Ok(source.clone()));
+    }
+    caller.output = Some(caller.add("vector2", &calls, None));
+    let expected = evaluate(&random, &BTreeMap::new()).unwrap();
+    let Value::Float2(values) = expected else { panic!("expected two random values") };
+    assert_ne!(values[0], values[1]);
+    assert_eq!(evaluate(&caller, &BTreeMap::new()).unwrap(), expected);
+}
+
+#[test]
+fn shared_conditions_keep_the_value_computed_before_a_sequence_assignment() {
+    let mut graph = FunctionGraph::default();
+    let get = graph.add("get_integer1", &[], Some(Value::Text("counter".into())));
+    let one = graph.add_constant(Value::Int(1));
+    let condition = graph.add("lr", &[get, one], None);
+    let assign = graph.add("set", &[one], Some(Value::Text("counter".into())));
+    let after = graph.add("sequence", &[assign, condition], None);
+    graph.output = Some(graph.add("sequence", &[condition, after], None));
+    assert_eq!(evaluate(&graph, &BTreeMap::from([("counter".into(), Value::Int(0))])).unwrap(), Value::Bool(true));
+}
+
+#[test]
+fn shared_assignment_nodes_run_once_per_function_evaluation() {
+    let mut graph = FunctionGraph::default();
+    let current = graph.add("get_integer1", &[], Some(Value::Text("counter".into())));
+    let one = graph.add_constant(Value::Int(1));
+    let next = graph.add("add", &[current, one], None);
+    let assign = graph.add("set", &[next], Some(Value::Text("counter".into())));
+    graph.output = Some(graph.add("ivector2", &[assign, assign], None));
+    assert_eq!(evaluate(&graph, &BTreeMap::from([("counter".into(), Value::Int(0))])).unwrap(), Value::Int2([1, 1]));
+}
+
+#[test]
+fn pixel_random_samples_vary_spatially_and_repeat_for_the_same_seed() {
+    let mut graph = FunctionGraph::default();
+    let one = graph.add_constant(Value::Float(1.0));
+    graph.output = Some(graph.add("rand", &[one], None));
+    let program = compile(&graph, 7).unwrap();
+    let mut state = EvaluationState::default();
+    let variables = BTreeMap::new();
+    let samples = |state: &mut EvaluationState| {
+        (0..16)
+            .map(|x| {
+                let context = EvaluationContext {
+                    scope: super::FunctionScope::PixelProcessor,
+                    position: [(x as f32 + 0.5) / 16.0, 0.5],
+                    size: [16.0; 2],
+                    images: &[],
+                    tile: true,
+                    variables: &variables,
+                };
+                let value = program.evaluate_pixel(&context, state).unwrap();
+                assert_eq!(value, program.evaluate(&context, &mut EvaluationState::default()).unwrap());
+                value
+            })
+            .collect::<Vec<_>>()
+    };
+    let first = samples(&mut state);
+    assert!(first.windows(2).all(|pair| pair[0] != pair[1]));
+    assert_eq!(first, samples(&mut state));
+}
+
+#[test]
+fn exposed_choices_are_integers_inside_functions() {
+    let mut graph = FunctionGraph::default();
+    let choice = graph.add("get_integer1", &[], Some(Value::Text("choice".into())));
+    let one = graph.add_constant(Value::Int(1));
+    graph.output = Some(graph.add("lr", &[choice, one], None));
+    assert_eq!(evaluate(&graph, &BTreeMap::from([("choice".into(), Value::Enum(0))])).unwrap(), Value::Bool(true));
+    graph.output = Some(graph.add("add", &[choice, one], None));
+    assert_eq!(evaluate(&graph, &BTreeMap::from([("choice".into(), Value::Enum(2))])).unwrap(), Value::Int(3));
+    assert!(evaluate(&graph, &BTreeMap::from([("choice".into(), Value::Enum(u32::MAX))])).is_err());
+}
+
+#[test]
+fn nested_function_assignments_escape_but_arguments_stay_local() {
+    let mut inner = FunctionGraph::default();
+    let argument = inner.add("get_integer1", &[], Some(Value::Text("argument".into())));
+    inner.output = Some(inner.add("set", &[argument], Some(Value::Text("exported".into()))));
+    let mut caller = FunctionGraph::default();
+    let call = caller.add("instance", &[], None);
+    let node = caller.nodes.last_mut().unwrap();
+    node.instance = Some(materialcraft_core::GraphInstance {
+        label: String::new(),
+        package: String::new(),
+        graph: "assign".into(),
+        inputs: Vec::new(),
+        outputs: Vec::new(),
+        defaults: BTreeMap::from([("argument".into(), Value::Int(42))]),
+    });
+    node.source = Some(Ok(std::sync::Arc::new(inner)));
+    let exported = caller.add("get_integer1", &[], Some(Value::Text("exported".into())));
+    let argument = caller.add("get_integer1", &[], Some(Value::Text("argument".into())));
+    let pair = caller.add("ivector2", &[exported, argument], None);
+    caller.output = Some(caller.add("sequence", &[call, pair], None));
+    assert_eq!(evaluate(&caller, &BTreeMap::from([("argument".into(), Value::Int(7))])).unwrap(), Value::Int2([42, 7]));
+}
+
+#[test]
+fn one_random_node_reuses_its_sample_across_vector_connections() {
+    let mut graph = FunctionGraph::default();
+    let one = graph.add_constant(Value::Float(1.0));
+    let random = graph.add("rand", &[one], None);
+    let pair = graph.add("vector2", &[random, random], None);
+    graph.output = Some(graph.add("vector4", &[pair, pair], None));
+    let Value::Float4(channels) = evaluate(&graph, &BTreeMap::new()).unwrap() else {
+        panic!("expected color");
+    };
+    assert!(channels.iter().all(|value| *value == channels[0]), "{channels:?}");
+}
+
+#[test]
+fn loops_refresh_random_samples_but_keep_each_iterations_fanout_equal() {
+    let mut samples = FunctionGraph::default();
+    let one = samples.add_constant(Value::Float(1.0));
+    let draws: Vec<_> = (0..3).map(|_| samples.add("rand", &[one], None)).collect();
+    let pair = samples.add("vector2", &draws[..2], None);
+    samples.output = Some(samples.add("vector3", &[pair, draws[2]], None));
+    let Value::Float3(expected) = evaluate(&samples, &BTreeMap::new()).unwrap() else {
+        panic!("expected samples");
+    };
+    assert_ne!(expected[0], expected[2]);
+
+    let mut graph = FunctionGraph::default();
+    let zero = graph.add_constant(Value::Int(0));
+    let one_int = graph.add_constant(Value::Int(1));
+    let three = graph.add_constant(Value::Int(3));
+    let one = graph.add_constant(Value::Float(1.0));
+    let zero_pair = graph.add_constant(Value::Float2([0.0; 2]));
+    let init = graph.add("set", &[zero], Some(Value::Text("counter".into())));
+    let init = graph.add("sequence", &[init, zero_pair], None);
+    let counter = graph.add("get_integer1", &[], Some(Value::Text("counter".into())));
+    let exit = graph.add("gteq", &[counter, three], None);
+    let next = graph.add("add", &[counter, one_int], None);
+    let advance = graph.add("set", &[next], Some(Value::Text("counter".into())));
+    let random = graph.add("rand", &[one], None);
+    let pair = graph.add("vector2", &[random, random], None);
+    let body = graph.add("sequence", &[advance, pair], None);
+    graph.output = Some(graph.add("while", &[init, exit, body], Some(Value::Int(3))));
+    assert_eq!(evaluate(&graph, &BTreeMap::new()).unwrap(), Value::Float2([expected[2]; 2]));
+}

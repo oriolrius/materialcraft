@@ -7,6 +7,19 @@ use std::io::{Cursor, Write};
 
 const SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><rect width="2" height="2" fill="red"/></svg>"#;
 
+#[test]
+fn archived_sbs_replaces_surface_references_from_the_shared_library() {
+    let xml = br#"<package><content><resource><identifier v="sun"/><format v="surface"/><filepath v="old/sun.surface"/></resource></content></package>"#;
+    let archive = zip(&[("package.sbs", xml), ("old/sun.surface", b"old container must never be read")]);
+    let read = project::read(&archive, "example.mcraft").unwrap();
+    assert!(read.warnings.is_empty(), "{:?}", read.warnings);
+    assert_eq!(read.pkg.resources[0].file, "sun.exr");
+    assert_eq!(read.pkg.resources[0].bytes.as_slice(), materialcraft_formats::sbs::library::read("sbs://resources/sun.exr").unwrap());
+    let files = ProjectFiles::build(&read.pkg, "saved.sbs", false).unwrap();
+    assert!(files.files.keys().any(|path| path.ends_with(".exr")));
+    assert!(!String::from_utf8_lossy(files.xml().unwrap()).contains(".surface"));
+}
+
 fn package() -> Package {
     let mut package = Package::new("Surface");
     let pixels = materialcraft_image::Image::filled(2, 2, materialcraft_image::Kind::Color, [0.2, 0.4, 0.8, 1.0]);

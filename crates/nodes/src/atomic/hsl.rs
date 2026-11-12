@@ -17,7 +17,8 @@ pub(super) fn definition() -> NodeDefinition {
 
 fn hsl(context: &CookContext) -> CookResult {
     let img = context.any_or(0, Kind::Color, [0.5, 0.5, 0.5, 1.0]).to_color();
-    let (dh, sat, lig) = (context.f("hue") - 0.5, context.f("saturation"), context.f("lightness"));
+    // The normalized slider spans one full turn in either direction from its midpoint.
+    let (dh, sat, lig) = ((context.f("hue") - 0.5) * 2.0, context.f("saturation"), context.f("lightness"));
     Ok(vec![img.map(Kind::Color, |p| {
         let [h, s, l] = ops::rgb_to_hsl(p);
         let s = if sat <= 0.5 { s * sat * 2.0 } else { s + (1.0 - s) * (sat - 0.5) * 2.0 };

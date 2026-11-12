@@ -3,6 +3,7 @@ mod evaluation;
 mod pattern_stamp;
 mod pattern_visit;
 mod raster;
+mod region;
 mod shape;
 
 pub use catalog::{definition, definitions};

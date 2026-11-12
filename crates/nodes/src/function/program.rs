@@ -28,14 +28,36 @@ impl Program {
     }
 
     pub fn evaluate(&self, context: &EvaluationContext<'_>, state: &mut EvaluationState) -> Result<Value, String> {
+        let mut random = self.random_seed(context);
+        self.evaluate_with_random(context, state, &mut random)
+    }
+
+    /// Pattern parameters share a random stream within each traversal visit.
+    pub(crate) fn evaluate_with_random(&self, context: &EvaluationContext<'_>, state: &mut EvaluationState, random: &mut u32) -> Result<Value, String> {
         state.variables.clone_from(context.variables);
+        state.random = *random;
         let mut remaining = MAX_EVALUATION_STEPS;
-        self.run(context, state, &mut remaining)
+        let result = self.run(context, state, &mut remaining);
+        *random = state.random;
+        result
+    }
+
+    fn random_seed(&self, context: &EvaluationContext<'_>) -> u32 {
+        let seed = context.variables.get("$randomseed").and_then(Value::as_i32).map_or(self.seed, |seed| seed as u32);
+        if context.scope == super::FunctionScope::PixelProcessor {
+            // Each pixel owns a deterministic stream, independent of worker scheduling.
+            let x = (context.position[0] * context.size[0]).floor() as u32;
+            let y = (context.position[1] * context.size[1]).floor() as u32;
+            crate::random::hash(seed ^ crate::random::hash(x.wrapping_add(0x9e37_79b9)) ^ crate::random::hash(y.wrapping_add(0x85eb_ca6b)))
+        } else {
+            seed
+        }
     }
 
     // Pixel assignments are local; only the general evaluator exports the complete environment
     pub(super) fn evaluate_pixel(&self, context: &EvaluationContext<'_>, state: &mut EvaluationState) -> Result<Value, String> {
         state.variables.clear();
+        state.random = self.random_seed(context);
         let mut remaining = MAX_EVALUATION_STEPS;
         self.run(context, state, &mut remaining)
     }
@@ -45,9 +67,9 @@ impl Program {
 
         state.steps.clear();
         state.values.clear();
+        state.assignments.clear();
         state.registers.clear();
         state.registers.resize(self.instructions.len(), None);
-        state.random = context.variables.get("$randomseed").and_then(Value::as_i32).map_or(self.seed, |seed| seed as u32);
         state.steps.push(Enter(self.output));
 
         while let Some(step) = state.steps.pop() {
@@ -59,6 +81,8 @@ impl Program {
                         state.values.push(value.clone());
                         continue;
                     }
+
+                    state.steps.push(Store(index));
 
                     match instruction.definition.id {
                         "ifelse" => {
@@ -89,20 +113,34 @@ impl Program {
                         for (name, value) in call.inputs.iter().zip(arguments) {
                             storage.variables.insert(name.clone(), value.clone());
                         }
-                        call.program.run(context, storage, remaining_steps)
+                        // A function call consumes its caller's stream instead of restarting it.
+                        storage.random = state.random;
+                        let result = call.program.run(context, storage, remaining_steps);
+                        state.random = storage.random;
+                        if result.is_ok() {
+                            // Set publishes into the caller's scope; arguments and defaults stay local.
+                            state.variables.extend(storage.assignments.clone());
+                            state.assignments.extend(storage.assignments.clone());
+                        }
+                        result
                     } else {
                         operation::evaluate(instruction, arguments, &mut state.variables, &mut state.random, context)
                     }
                     .map_err(|error| format!("{} ({}): {error}", instruction.definition.label, instruction.id))?;
 
-                    state.values.truncate(base);
-                    if instruction.pure
-                        && let Some(register) = state.registers.get_mut(index)
+                    if instruction.definition.id == "set"
+                        && let Some(Value::Text(name)) = &instruction.value
                     {
-                        *register = Some(result.clone());
+                        state.assignments.insert(name.clone(), result.clone());
                     }
 
+                    state.values.truncate(base);
                     state.values.push(result);
+                }
+                Store(index) => {
+                    let value = state.values.last().ok_or("missing function result")?;
+                    let register = state.registers.get_mut(index).ok_or("invalid function register")?;
+                    *register = Some(value.clone());
                 }
                 Branch(index) => {
                     let condition = state.values.pop().ok_or("missing branch condition")?;
@@ -116,6 +154,7 @@ impl Program {
                 }
                 LoopStart(index) => {
                     let last = state.values.pop().ok_or("missing loop initialization")?;
+                    self.clear_dynamic_results(state);
                     state.steps.push(LoopCondition { instruction: index, iteration: 0, last });
                     state.steps.push(Enter(self.input(index, 1)?));
                 }
@@ -125,12 +164,14 @@ impl Program {
                     if exit || (maximum >= 0 && iteration >= maximum as u32) {
                         state.values.push(last);
                     } else {
+                        self.clear_dynamic_results(state);
                         state.steps.push(LoopBody { instruction: index, iteration: iteration.saturating_add(1) });
                         state.steps.push(Enter(self.input(index, 2)?));
                     }
                 }
                 LoopBody { instruction: index, iteration } => {
                     let last = state.values.pop().ok_or("missing loop body result")?;
+                    self.clear_dynamic_results(state);
                     state.steps.push(LoopCondition { instruction: index, iteration, last });
                     state.steps.push(Enter(self.input(index, 1)?));
                 }
@@ -144,5 +185,15 @@ impl Program {
         }
 
         Ok(result)
+    }
+
+    fn clear_dynamic_results(&self, state: &mut EvaluationState) {
+        // A node's outgoing wires share its computed value, including reads, branches and side effects.
+        // Loop phases evaluate variable-dependent nodes anew; constants remain reusable.
+        for (instruction, register) in self.instructions.iter().zip(&mut state.registers) {
+            if !instruction.pure {
+                *register = None;
+            }
+        }
     }
 }

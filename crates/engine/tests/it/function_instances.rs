@@ -251,7 +251,7 @@ fn function_calls_reject_wrong_canvas_cycles_and_outputless_sources() {
 }
 
 #[test]
-fn calls_isolate_variables_and_evaluate_arguments_once() {
+fn calls_publish_assignments_and_evaluate_arguments_once() {
     let mut package = source();
     let mut source = FunctionGraph::default();
     let input = source.add("get_float1", &[], Some(Value::Text("amount".into())));
@@ -275,10 +275,12 @@ fn calls_isolate_variables_and_evaluate_arguments_once() {
         inputs: vec![GraphPort { identifier: "amount".into(), type_code: 256 }],
         outputs: vec![GraphPort { identifier: "output".into(), type_code: 256 }],
     });
-    let total = caller.add("add", &[call, get], None);
+    let after = caller.add("get_float1", &[], Some(Value::Text("private".into())));
+    let total = caller.add("add", &[call, after], None);
     caller.output = Some(caller.add("sequence", &[init, total], None));
     function::resolve_instances(&mut caller, &package, &BTreeMap::new());
-    assert_eq!(evaluate(&caller), Value::Float(6.0));
+    // The argument is evaluated once (2 + 2), and Set publishes 99 to the caller's node scope.
+    assert_eq!(evaluate(&caller), Value::Float(103.0));
 }
 
 #[test]

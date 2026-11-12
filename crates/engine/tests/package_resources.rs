@@ -4,6 +4,25 @@ use serde_json::json;
 const SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><rect width="2" height="2" fill="red"/></svg>"#;
 
 #[test]
+fn byte_only_sbs_import_resolves_library_resource_substitutes() {
+    let xml = br#"<package><content>
+        <resource><identifier v="noise"/><format v="surface"/><filepath v="old/bluenoise_256_c.surface"/></resource>
+        <resource><identifier v="font"/><format v="ttf"/><filepath v="old/cour.ttf"/></resource>
+        </content></package>"#;
+    let mut session = Session::new(Package::new("Empty"));
+    file_cmds::open_bytes(&mut session, xml, Some("example.sbs".into())).unwrap();
+    assert!(session.load_warnings.is_empty(), "{:?}", session.load_warnings);
+    for (name, filename) in [("noise", "bluenoise_256_c.exr"), ("font", "cursor.otf")] {
+        let resource = session.pkg.resource(name).unwrap();
+        assert_eq!(resource.file, filename);
+        assert_eq!(resource.bytes.as_slice(), materialcraft_engine::formats::sbs::library::read(&format!("sbs://resources/{filename}")).unwrap());
+    }
+    let saved = String::from_utf8(file_cmds::save_bytes(&session).unwrap()).unwrap();
+    assert!(!saved.contains(".surface"));
+    assert!(!saved.contains("cour.ttf"));
+}
+
+#[test]
 fn imports_remain_undoable_in_packages_with_many_resources() {
     use materialcraft_engine::core::{Resource, ResourceBytes};
     let mut package = Package::new("Resources");

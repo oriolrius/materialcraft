@@ -57,6 +57,28 @@ fn iterate_sets_number_and_switch_selects_one_child() {
 }
 
 #[test]
+fn iterate_preserves_assignments_from_previous_iterations() {
+    let mut graph = PatternGraph::with_root(PatternNodeKind::Iterate);
+    let child = graph.add(PatternNodeKind::Quadrant).unwrap();
+    graph.nodes[0].children = vec![None, Some(child)];
+    let mut initialize = FunctionGraph::default();
+    let zero = initialize.add_constant(Value::Float(0.0));
+    let count = initialize.add_constant(Value::Int(3));
+    let set = initialize.add("set", &[zero], Some(Value::Text("counter".into())));
+    initialize.output = Some(initialize.add("sequence", &[set, count], None));
+    graph.nodes[0].parameters.insert("numberadded".into(), Value::Function(Box::new(initialize)));
+    let mut increment = FunctionGraph::default();
+    let value = increment.add("get_float1", &[], Some(Value::Text("counter".into())));
+    let one = increment.add_constant(Value::Float(1.0));
+    let next = increment.add("add", &[value, one], None);
+    increment.output = Some(increment.add("set", &[next], Some(Value::Text("counter".into()))));
+    graph.nodes[1].parameters.insert("patterntype".into(), Value::Int(2));
+    graph.nodes[1].parameters.insert("opacity".into(), Value::Function(Box::new(increment)));
+    let image = cook(graph).unwrap().remove(0);
+    assert!(image.data.iter().all(|value| *value == 6.0), "expected 1 + 2 + 3, got {:?}", image.mean());
+}
+
+#[test]
 fn patterns_reject_cycles_and_bound_exponential_traversal() {
     let mut graph = PatternGraph::default();
     let root = graph.add(PatternNodeKind::Quadrant).unwrap();
@@ -124,13 +146,14 @@ fn roughness_sample(roughness: f32, depth: usize, blend: i32, color: bool, repea
 #[test]
 fn roughness_attenuates_quadrants_by_depth_and_keeps_background() {
     for color in [false, true] {
-        for (roughness, depth, weight) in [(0.0, 2, 1.0), (1.0, 0, 1.0), (1.0, 1, 0.5), (0.5, 2, 0.5), (2.0, 2, 0.0625), (-1.0, 1, 2.0)] {
+        for (roughness, depth, weight) in [(0.0, 2, 1.0), (1.0, 0, 1.0), (1.0, 1, 0.5), (0.5, 2, 1.0 / 7.0), (2.0, 2, 4.0 / 7.0)] {
             for blend in 0..=2 {
                 let image = roughness_sample(roughness, depth, blend, color, false).unwrap().remove(0);
                 let pixel = image.get(0, 0, false);
                 for (channel, foreground) in [0.8_f32, 0.4, 0.2, 1.0].into_iter().take(image.kind.channels()).enumerate() {
                     let value = foreground * 0.5 * weight;
                     let expected = match blend {
+                        1 if !color => value.max(0.1),
                         1 => value + 0.1 * (1.0 - 0.5 * weight),
                         2 => value.max(0.1),
                         _ => value + 0.1,
@@ -148,13 +171,13 @@ fn roughness_attenuates_quadrants_by_depth_and_keeps_background() {
 #[test]
 fn repetition_switches_and_dots_do_not_add_roughness_depth() {
     let image = roughness_sample(1.0, 2, 0, false, true).unwrap().remove(0);
-    assert!((image.get(0, 0, false)[0] - 0.3).abs() < 1e-6);
+    assert!((image.get(0, 0, false)[0] - (0.1 + 0.8 / 3.0)).abs() < 1e-6);
     assert!((image.get(15, 15, false)[0] - 0.1).abs() < 1e-6);
 }
 
 #[test]
-fn excessive_negative_roughness_reports_overflow() {
-    assert!(roughness_sample(-32.0, 5, 0, false, false).unwrap_err().contains("roughness overflowed"));
+fn negative_roughness_reports_an_error() {
+    assert!(roughness_sample(-32.0, 5, 0, false, false).unwrap_err().contains("roughness must be finite and nonnegative"));
 }
 
 #[test]

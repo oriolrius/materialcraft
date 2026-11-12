@@ -82,7 +82,7 @@ pub(crate) fn cook_node(
     }
 
     let input_base = prepared.input_base(node.id, cooked);
-    let (mut base, base_values, base_error) = match crate::resolved_base_parameters::evaluate(&node.base, input_base, prepared.parent_base, &variables) {
+    let (mut base, base_values, base_error) = match crate::resolved_base_parameters::evaluate(&node.base, input_base, prepared.parent_base, &mut variables) {
         Ok((base, values)) => (base, values, None),
         Err(error) => (crate::ResolvedBaseParameters::resolve(&node.base, input_base, prepared.parent_base), BTreeMap::new(), Some(error)),
     };
@@ -115,12 +115,12 @@ pub(crate) fn cook_node(
         base.variables(variables.to_mut());
     }
 
-    let variables = &variables;
     let seed = base.seed;
-    let mut parameters = match resolve_parameters(package, node, definition, variables, seed, base.size) {
+    let mut parameters = match resolve_parameters(package, node, definition, &mut variables, seed, base.size) {
         Ok(parameters) => parameters,
         Err(error) => return fail(error, 0),
     };
+    let variables = &variables;
 
     let tile = base.tiling[0] && base.tiling[1];
 

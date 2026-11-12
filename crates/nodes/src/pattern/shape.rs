@@ -16,11 +16,8 @@ pub(super) fn coverage(pattern: i32, x: f32, y: f32, variation: f32) -> Result<f
         6 => (1.0 - radius_squared.sqrt()).max(0.0).powi(4),
         7 => (1.0 - x.abs().max(y.abs())).max(0.0),
         8 => {
-            if x.abs() <= 1.0 - variation.clamp(0.0, 0.99) {
-                1.0
-            } else {
-                0.0
-            }
+            let bevel = variation.clamp(0.0, 1.0);
+            if bevel <= f32::EPSILON { 1.0 } else { ((1.0 - x.abs().max(y.abs())) / bevel).clamp(0.0, 1.0) }
         }
         9 => (x + 1.0) * 0.5,
         10 => (x * std::f32::consts::PI).cos() * 0.5 + 0.5,

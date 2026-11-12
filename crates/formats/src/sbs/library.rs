@@ -160,14 +160,14 @@ fn scan(directory: &std::path::Path, prefix: &str, depth: usize, found: &mut Vec
 mod tests {
     use super::*;
 
-    /// The shipped fallback preserves the exact generated SBS and resource bytes.
+    /// The shipped fallback preserves the exact SBS and resource bytes.
     #[test]
     fn embedded_library_contains_every_disk_asset() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/sbs");
         for (relative, _, _) in EMBEDDED_ASSETS {
             assert_eq!(read_embedded(relative).unwrap(), std::fs::read(root.join(relative)).unwrap(), "{relative}");
         }
-        assert!(read_embedded("resources/DoorFrame.svg").unwrap().starts_with(b"<svg"));
+        assert!(read_embedded("resources/cursor.otf").unwrap().starts_with(b"OTTO"));
     }
 
     /// Discovered packages have unique valid aliases and the embedded fallback is present.

@@ -5,6 +5,27 @@ use materialcraft_engine::{
 };
 use serde_json::{Value, json};
 
+#[test]
+fn bundled_cloud_and_white_noise_parameter_scopes_cook() {
+    let mut session = materialcraft_engine::new_session();
+    session.preview_size = Some(64);
+    for file in ["clouds_3.sbs", "noise_clouds_3_v2.sbs", "white_noise_v2.sbs"] {
+        materialcraft_engine::file_cmds::open_file(&mut session, &format!("sbs://{file}")).unwrap();
+        let warnings = materialcraft_engine::function_inspection::warnings(session.graph().unwrap());
+        assert!(warnings.is_empty(), "{file}: {warnings:?}");
+        let nodes = session.graph().unwrap().nodes.clone();
+        let cooked = session.cook();
+        let failures: Vec<_> = cooked.nodes.iter().filter_map(|(id, result)| result.error.as_ref().map(|error| (*id, error))).collect();
+        assert!(failures.is_empty(), "{file}: {failures:?}");
+        for node in nodes.iter().filter(|node| matches!(node.def.as_str(), "output" | "fx_map")) {
+            let image = cooked.image(node.id, 0).unwrap();
+            let low = image.data.iter().copied().fold(f32::INFINITY, f32::min);
+            let high = image.data.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            assert!(high - low > 0.05, "{file} lost variation: {low}..{high}");
+        }
+    }
+}
+
 #[path = "../support/node_library.rs"]
 pub(super) mod fixture;
 
@@ -22,6 +43,18 @@ fn bundled_brick_material_cooks_without_missing_functions_or_budget_errors() {
         let image = cooked.image(output, 0).unwrap();
         assert!(image.data.iter().all(|value| value.is_finite()));
     }
+    // Finite output alone missed flat noise, identical tile values and a half-turn hue error.
+    for id in [24, 34, 48, 91] {
+        let image = cooked.image(materialcraft_engine::core::NodeId(id), 0).unwrap();
+        let low = image.data.iter().copied().fold(f32::INFINITY, f32::min);
+        let high = image.data.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        assert!(high - low > 0.05, "node {id} lost its variation: {low}..{high}");
+        if id == 24 {
+            assert!((0.15..0.85).contains(&image.mean()[0]), "fractal noise has lost its neutral range");
+        }
+    }
+    let color = cooked.image(materialcraft_engine::core::NodeId(99), 0).unwrap().mean();
+    assert!(color[0] > color[2], "the default brick color shifted to blue: {color:?}");
 }
 
 /// Return the catalog entries exposed by the library command.

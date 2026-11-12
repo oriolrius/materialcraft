@@ -69,7 +69,7 @@ fn dynamic_roughness_survives_native_saving_and_invalidates_the_cook_cache() {
         let owner = package.graphs[0].nodes[0].id;
         let cache = std::sync::Mutex::new(materialcraft_engine::eval::Cache::default());
         let mut options = materialcraft_engine::eval::Options::new(&|_| None);
-        for (time, expected) in [(0.0, 1.0), (1.0, 0.5), (2.0, 0.25)] {
+        for (time, expected) in [(0.0, 1.0), (0.5, 1.0 / 3.0), (1.0, 0.5), (2.0, 2.0 / 3.0)] {
             options.environment.time_seconds = time;
             let result = materialcraft_engine::eval::cook(&package, 0, &options, &cache);
             assert_eq!(result.nodes[&owner].error, None);

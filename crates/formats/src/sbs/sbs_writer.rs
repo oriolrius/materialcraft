@@ -323,13 +323,22 @@ impl SbsWriter {
                             );
                             continue;
                         }
-                        out.push_str(&param_xml(sbs_name, value).unwrap_or_default());
+                        if filter.sbs == "text"
+                            && *sbs_name == "fontdata"
+                            && let Value::Text(name) = value
+                            && let Some(resource) = package.resource(name)
+                        {
+                            let reference = Value::Text(format!("pkg:///{}?dependency={}", resource.sbs_path(), ids.self_uid));
+                            out.push_str(&param_xml(sbs_name, &reference).unwrap_or_default());
+                        } else {
+                            out.push_str(&param_xml(sbs_name, value).unwrap_or_default());
+                        }
                     }
                     out.push_str(&special_filter_params_xml(filter.sbs, &value_of, ids.self_uid, package));
                     out.push_str("</parameters>");
                     for parameter in ["curve", "gradient"] {
                         if let Some(value) = value_of(parameter) {
-                            out.push_str(&super::parameter_array::write(value, self));
+                            out.push_str(&super::parameter_array::write(value, value_of("color_mode").and_then(Value::as_bool).unwrap_or(true), self));
                         }
                     }
                     if let Some(Value::PatternGraph(graph)) = value_of("pattern") {
