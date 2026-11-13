@@ -112,6 +112,21 @@ the engine.
 
 ## 3. Golden rules
 
+### Approved licence exceptions
+
+MaterialCraft has explicit user approval for the following licences. These approvals take
+precedence over the shared licence allowlist restriction on repository-specific additions:
+
+- `BSD-3-Clause` is approved and is already in the shared allowlist.
+- The GUST Font License (GFL; `LicenseRef-GUST-Font-License`) is approved, including the
+  LPPL-1.3c-or-later conditions it incorporates. See the bundled
+  [GUST notice](assets/sbs/resources/GUST-FONT-LICENSE.txt) and
+  [LPPL text](assets/sbs/resources/LPPL-1.3c.txt).
+
+Do not stop work or request further licensing approval solely because a dependency or asset
+uses either licence. Keep required licence notices and attribution. Other licences outside the
+shared allowlist still require approval.
+
 ### Never name the reference product (absolutely essential)
 
 - The repository never names the commercial product MaterialCraft is modeled on, nor its vendor,
