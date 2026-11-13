@@ -15,7 +15,17 @@ fn render(region: [f32; 4], tiling: [f32; 4], tile: bool) -> materialcraft_nodes
             ("tiling_region".into(), Value::Float4(tiling)),
         ]),
     );
-    (definition.cook)(&CookContext { w: 64, h: 64, seed: 0, tile, inputs: &[], params: &params, resource: &|_| None, vars: &BTreeMap::new() })
+    (definition.cook)(&CookContext {
+        format: materialcraft_core::OutputFormat::F32,
+        w: 64,
+        h: 64,
+        seed: 0,
+        tile,
+        inputs: &[],
+        params: &params,
+        resource: &|_| None,
+        vars: &BTreeMap::new(),
+    })
 }
 
 #[test]

@@ -1,6 +1,6 @@
 use super::type_code;
 use super::xml::{format_float, parse_floats, parse_ints, xml_escape};
-use materialcraft_core::{Value, linear_to_srgb, srgb_to_linear};
+use materialcraft_core::Value;
 use roxmltree::Node as XmlNode;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -73,14 +73,15 @@ pub(super) fn to_param_value(like: &Value, value: &SbsValue, options: usize) -> 
         Value::Float2(_) => Value::Float2([f(0), f(1)]),
         Value::Float3(_) => Value::Float3([f(0), f(1), f(2)]),
         Value::Float4(_) => Value::Float4([f(0), f(1), f(2), f(3)]),
-        // SBS colors are stored as displayed (sRGB); MaterialCraft's are linear
+        // These are graph components, including grayscale data and function inputs.
+        // Applying a display transfer here changes the arithmetic performed by nodes.
         Value::Color(_) if value.component_count() >= 3 => {
             let alpha = if value.component_count() >= 4 { f(3) } else { 1.0 };
 
-            Value::Color([srgb_to_linear(f(0)), srgb_to_linear(f(1)), srgb_to_linear(f(2)), alpha])
+            Value::Color([f(0), f(1), f(2), alpha])
         }
         Value::Color(_) => {
-            let gray = srgb_to_linear(f(0));
+            let gray = f(0);
             Value::Color([gray, gray, gray, 1.0])
         }
         Value::Int(_) => Value::Int(value.int(0)),
@@ -151,7 +152,7 @@ pub(super) fn constant_xml(value: &Value) -> Option<String> {
         Value::Float2(x) => ("constantValueFloat2", join(x)),
         Value::Float3(x) => ("constantValueFloat3", join(x)),
         Value::Float4(x) => ("constantValueFloat4", join(x)),
-        Value::Color(c) => ("constantValueFloat4", join(&[linear_to_srgb(c[0]), linear_to_srgb(c[1]), linear_to_srgb(c[2]), c[3]])),
+        Value::Color(c) => ("constantValueFloat4", join(c)),
         Value::Int(i) => ("constantValueInt32", i.to_string()),
         Value::Int2(i) => ("constantValueInt2", format!("{} {}", i[0], i[1])),
         Value::Int3(i) => ("constantValueInt3", format!("{} {} {}", i[0], i[1], i[2])),

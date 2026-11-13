@@ -1,8 +1,8 @@
 //! Native function primitives, compilation and bounded evaluation
 
-// Individual graphs stay capped at 4096 nodes. Shared calls can expand beyond that size
-// (the bundled noise/render functions use 4426/6997), but must not grow without a ceiling.
-const MAX_EXPANDED_NODES: usize = 65_536;
+// Individual graphs stay capped at 4096 nodes. The volume-light graph expands to
+// 72,973 nodes through shared calls; retain a global ceiling to bound hostile inputs.
+const MAX_EXPANDED_NODES: usize = 131_072;
 const MAX_CALL_DEPTH: usize = 16;
 
 mod arithmetic;

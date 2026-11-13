@@ -42,7 +42,17 @@ fn optimization_baseline() {
     for size in [512, 2048] {
         for count in [0, 16] {
             let variables = (0..count).map(|index| (format!("input_{index}"), Value::Float(index as f32))).collect();
-            let context = CookContext { w: size, h: size, seed: 7, tile: true, inputs: &[], params: &parameters, resource: &|_| None, vars: &variables };
+            let context = CookContext {
+                format: materialcraft_core::OutputFormat::F32,
+                w: size,
+                h: size,
+                seed: 7,
+                tile: true,
+                inputs: &[],
+                params: &parameters,
+                resource: &|_| None,
+                vars: &variables,
+            };
             let ms = median_ms(|| {
                 black_box((definition.cook)(&context).unwrap());
             });

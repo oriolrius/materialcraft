@@ -9,7 +9,17 @@ fn cook(graph: PatternGraph) -> crate::CookResult {
 fn cook_with_variables(graph: PatternGraph, variables: &BTreeMap<String, Value>) -> crate::CookResult {
     let definition = find("fx_map").unwrap();
     let parameters = resolve_params(definition, &BTreeMap::from([("pattern".into(), Value::PatternGraph(Box::new(graph)))]));
-    let context = CookContext { w: 16, h: 16, seed: 7, tile: true, inputs: &[], params: &parameters, resource: &|_| None, vars: variables };
+    let context = CookContext {
+        format: materialcraft_core::OutputFormat::F32,
+        w: 16,
+        h: 16,
+        seed: 7,
+        tile: true,
+        inputs: &[],
+        params: &parameters,
+        resource: &|_| None,
+        vars: variables,
+    };
     (definition.cook)(&context)
 }
 
@@ -139,7 +149,17 @@ fn roughness_sample(roughness: f32, depth: usize, blend: i32, color: bool, repea
             ("background".into(), Value::Color([0.1; 4])),
         ]),
     );
-    let context = CookContext { w: 16, h: 16, seed: 7, tile: true, inputs: &[], params: &parameters, resource: &|_| None, vars: &BTreeMap::new() };
+    let context = CookContext {
+        format: materialcraft_core::OutputFormat::F32,
+        w: 16,
+        h: 16,
+        seed: 7,
+        tile: true,
+        inputs: &[],
+        params: &parameters,
+        resource: &|_| None,
+        vars: &BTreeMap::new(),
+    };
     (definition.cook)(&context)
 }
 
@@ -190,7 +210,17 @@ fn a_full_nine_level_quadtree_renders_one_pattern_per_pixel() {
     graph.nodes.last_mut().unwrap().parameters.insert("patterntype".into(), Value::Int(2));
     let definition = find("fx_map").unwrap();
     let parameters = resolve_params(definition, &BTreeMap::from([("pattern".into(), Value::PatternGraph(Box::new(graph)))]));
-    let context = CookContext { w: 256, h: 256, seed: 7, tile: true, inputs: &[], params: &parameters, resource: &|_| None, vars: &BTreeMap::new() };
+    let context = CookContext {
+        format: materialcraft_core::OutputFormat::F32,
+        w: 256,
+        h: 256,
+        seed: 7,
+        tile: true,
+        inputs: &[],
+        params: &parameters,
+        resource: &|_| None,
+        vars: &BTreeMap::new(),
+    };
     let images = (definition.cook)(&context).unwrap();
     assert!(images[0].data.iter().all(|value| (*value - 1.0).abs() < 1e-6));
 }
@@ -231,7 +261,17 @@ fn the_render_region_is_the_part_of_pattern_space_the_image_shows() {
         definition,
         &BTreeMap::from([("pattern".into(), Value::PatternGraph(Box::new(graph))), ("render_region".into(), Value::Float4([0.0, 2.0, 0.0, 2.0]))]),
     );
-    let context = CookContext { w: 16, h: 16, seed: 7, tile: false, inputs: &[], params: &parameters, resource: &|_| None, vars: &BTreeMap::new() };
+    let context = CookContext {
+        format: materialcraft_core::OutputFormat::F32,
+        w: 16,
+        h: 16,
+        seed: 7,
+        tile: false,
+        inputs: &[],
+        params: &parameters,
+        resource: &|_| None,
+        vars: &BTreeMap::new(),
+    };
 
     let image = (definition.cook)(&context).unwrap().remove(0);
 
@@ -277,7 +317,17 @@ fn a_pixel_on_the_seam_of_two_patterns_is_drawn_once() {
     let parameters = resolve_params(definition, &BTreeMap::from([("pattern".into(), Value::PatternGraph(Box::new(graph)))]));
     let variables = BTreeMap::new();
     // Two pixels a side put every pixel center on the corner of four of the sixteen squares
-    let context = CookContext { w: 2, h: 2, seed: 7, tile: true, inputs: &[], params: &parameters, resource: &|_| None, vars: &variables };
+    let context = CookContext {
+        format: materialcraft_core::OutputFormat::F32,
+        w: 2,
+        h: 2,
+        seed: 7,
+        tile: true,
+        inputs: &[],
+        params: &parameters,
+        resource: &|_| None,
+        vars: &variables,
+    };
 
     let image = (definition.cook)(&context).unwrap().remove(0);
 

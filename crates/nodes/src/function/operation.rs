@@ -32,7 +32,27 @@ pub(crate) fn evaluate(
 
     if op.starts_with("get_") {
         let name = name()?;
-        let value = context.variable(name, variables)?.ok_or_else(|| format!("undefined variable `{name}` in this context"))?;
+        let missing = || format!("undefined variable `{name}` in this context");
+        let value = match context.variable(name, variables)? {
+            Some(value) => value,
+            // User counters can be read before their first Set. They start at
+            // typed zero; unavailable system variables must still report errors.
+            None if !name.starts_with('$') => materialcraft_core::ValueType::from_code(instruction.type_code)
+                .filter(|kind| *kind != materialcraft_core::ValueType::String)
+                .map(materialcraft_core::ValueType::default_value)
+                .ok_or_else(missing)?,
+            None => return Err(missing()),
+        };
+
+        // Older authored graphs read an exposed integer option as a Boolean.
+        // Keep system-variable type checks strict; user options use zero/nonzero.
+        if op == "get_bool"
+            && !name.starts_with('$')
+            && matches!(value, Value::Int(_) | Value::Enum(_))
+            && let Some(integer) = value.as_i32()
+        {
+            return Ok(Value::Bool(integer != 0));
+        }
 
         if value_type::type_code(&value) != instruction.type_code {
             return Err(format!("variable `{name}` has the wrong type for {op}"));
@@ -81,32 +101,33 @@ pub(crate) fn evaluate(
                 (Value::Float(a), Value::Float(b)) => a.partial_cmp(b),
                 (Value::Bool(a), Value::Bool(b)) => a.partial_cmp(b),
                 _ => return Err("comparison requires numeric inputs".into()),
-            }
-            .ok_or("cannot compare non-finite values")?;
-            Value::Bool(match op {
+            };
+            // Ordered IEEE comparisons are false for NaN, including <= and >=.
+            // Undefined intermediates can therefore select a finite fallback.
+            Value::Bool(ordering.is_some_and(|ordering| match op {
                 "gt" => ordering.is_gt(),
                 "gteq" => ordering.is_ge(),
                 "lr" => ordering.is_lt(),
                 _ => ordering.is_le(),
-            })
+            }))
         }
         "samplecol" | "samplelum" => {
             let position = floats(first()?)?;
             if dimensions(first()?) != 2 {
                 return Err("sample position must be float2".into());
             }
-            let setting = instruction.value.as_ref().map(integers).transpose()?.unwrap_or([0, 1, 0, 0]);
+            let setting = instruction.value.as_ref().map(integers).transpose()?.unwrap_or([0, 0, 0, 0]);
             let index = usize::try_from(setting[0]).map_err(|_| "negative image index")?;
             let pixel = match context.images.get(index).and_then(Option::as_ref) {
                 Some(image) if setting[1] == 0 => {
                     image.get((position[0] * image.w as f32).floor() as i64, (position[1] * image.h as f32).floor() as i64, context.tile)
                 }
-                Some(image) => image.sample(position[0], position[1], context.tile),
+                Some(image) => image.sample_stored(position[0], position[1], context.tile),
                 None => [0.0; 4],
             };
 
             if op == "samplelum" { Value::Float(pixel[0]) } else { Value::Float4(pixel) }
         }
-        _ => return super::arithmetic::evaluate(op, arguments, random),
+        _ => return super::arithmetic::evaluate(op, arguments, random, context.scope),
     })
 }

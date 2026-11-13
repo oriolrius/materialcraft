@@ -12,7 +12,7 @@ fn compile_nested(graph: &FunctionGraph, seed: u32, depth: usize, remaining: &mu
         return Err("function exceeds the 4096-node graph limit".into());
     }
     if depth > super::MAX_CALL_DEPTH || graph.nodes.len() > *remaining {
-        return Err("function exceeds the 16-level or 65536-node expanded execution limit".into());
+        return Err(format!("function exceeds the {}-level or {}-node expanded execution limit", super::MAX_CALL_DEPTH, super::MAX_EXPANDED_NODES));
     }
     *remaining -= graph.nodes.len();
     let output = super::output_node(graph).ok_or("function has no result node")?.id;

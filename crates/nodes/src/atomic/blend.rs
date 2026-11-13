@@ -14,7 +14,8 @@ pub(super) fn definition() -> NodeDefinition {
         .gray_in("mask", "Opacity")
         .float("opacity", "Opacity", 1.0, 0.0, 1.0)
         .choice("mode", "Blending mode", BLEND_MODES, 0)
-        .boolean("alpha", "Use source alpha", true)
+        .boolean("alpha", "Alpha blending", true)
+        .choice("color_blending", "Alpha interpretation", &["Source alpha", "Ignore alpha", "Straight", "Premultiplied"], 0)
         .any_out()
         .cook(blend)
 }
@@ -26,10 +27,13 @@ fn blend(context: &CookContext) -> CookResult {
     let bg = bg.unwrap_or_else(|| Image::filled(context.w, context.h, kind, [0.0, 0.0, 0.0, 1.0]));
     let mask = context.sized(2).map(|m| m.to_gray());
     let (mode, op) = (context.i("mode"), context.f("opacity"));
-    let use_alpha = context.b("alpha") && !fg.is_gray();
+    let color_blending = context.i("color_blending");
+    let blend_alpha = context.b("alpha") && !fg.is_gray();
+    let clamp =
+        matches!(context.format, materialcraft_core::OutputFormat::U8 | materialcraft_core::OutputFormat::U16 | materialcraft_core::OutputFormat::Inherit);
     Ok(vec![Image::generate(context.w, context.h, kind, |x, y| {
         let (x, y) = (x as i64, y as i64);
         let m = mask.as_ref().map_or(1.0, |m| m.get_gray(x, y, false));
-        ops::blend_px(mode, bg.get(x, y, false), fg.get(x, y, false), op * m, use_alpha, true)
+        ops::blend_px(mode, bg.get(x, y, false), fg.get(x, y, false), op * m, color_blending, blend_alpha, clamp)
     })])
 }

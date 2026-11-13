@@ -528,7 +528,17 @@ fn every_pixel_of_a_processor_draws_its_own_random_numbers() {
     let definition = crate::find("pixel_processor").unwrap();
     let parameters = crate::resolve_params(definition, &BTreeMap::from([("function".into(), Value::Function(Box::new(function)))]));
     let variables = BTreeMap::new();
-    let context = crate::CookContext { w: 8, h: 8, seed: 3, tile: true, inputs: &[], params: &parameters, resource: &|_| None, vars: &variables };
+    let context = crate::CookContext {
+        format: materialcraft_core::OutputFormat::F32,
+        w: 8,
+        h: 8,
+        seed: 3,
+        tile: true,
+        inputs: &[],
+        params: &parameters,
+        resource: &|_| None,
+        vars: &variables,
+    };
 
     let image = (definition.cook)(&context).unwrap().remove(0);
 

@@ -206,7 +206,17 @@ mod tests {
         let p = resolve_params(def, &BTreeMap::new());
         let no_res = |_: &str| None;
         let vars = BTreeMap::new();
-        let context = CookContext { w: 256, h: 256, seed: 0, tile: true, inputs: &[], params: &p, resource: &no_res, vars: &vars };
+        let context = CookContext {
+            format: materialcraft_core::OutputFormat::F32,
+            w: 256,
+            h: 256,
+            seed: 0,
+            tile: true,
+            inputs: &[],
+            params: &p,
+            resource: &no_res,
+            vars: &vars,
+        };
         let img = &text(&context).unwrap()[0];
         let lit = img.data.iter().filter(|value| **value > 0.5).count();
         assert!(lit > 300, "{lit} pixels");

@@ -34,8 +34,10 @@ pub fn levels_fn(v: f32, in_low: f32, in_mid: f32, in_high: f32, out_low: f32, o
     let t = if span.abs() < 1e-6 { if v >= in_high { 1.0 } else { 0.0 } } else { ((v - in_low) / span).clamp(0.0, 1.0) };
     // NaN (from an input or a hostile parameter) would otherwise spread through the graph
     let t = if t.is_finite() { t } else { 0.0 };
-    let mid = in_mid.clamp(0.001, 0.999);
-    let g = 0.5f32.ln() / mid.ln();
+    let mid = if in_mid.is_finite() { in_mid.clamp(0.0, 1.0) } else { 0.5 };
+    // The midpoint slider controls reciprocal gamma below neutral and gamma above it.
+    // Treating it as an input value that maps to 0.5 changes authored levels curves.
+    let g = if mid <= 0.5 { 1.0 / (9.0 - 16.0 * mid) } else { 16.0 * mid - 7.0 };
     out_low + t.powf(g) * (out_high - out_low)
 }
 
@@ -54,9 +56,9 @@ mod levels_tests {
         assert!(close(levels_fn(0.4, 0.2, 0.5, 0.6, 0.0, 1.0), 0.5));
         assert!(close(levels_fn(0.1, 0.2, 0.5, 0.6, 0.0, 1.0), 0.0));
         assert!(close(levels_fn(0.9, 0.2, 0.5, 0.6, 0.0, 1.0), 1.0));
-        // Mid is relative to the input range: the value there becomes 0.5
-        assert!(close(levels_fn(0.25, 0.0, 0.25, 1.0, 0.0, 1.0), 0.5));
-        assert!(close(levels_fn(0.3, 0.2, 0.25, 0.6, 0.0, 1.0), 0.5));
+        // The same gamma curve applies after normalizing the input range.
+        assert!(close(levels_fn(0.25, 0.0, 0.25, 1.0, 0.0, 1.0), 0.7578583));
+        assert!(close(levels_fn(0.3, 0.2, 0.25, 0.6, 0.0, 1.0), 0.7578583));
         // The output range, inverted when low > high
         assert!(close(levels_fn(0.5, 0.0, 0.5, 1.0, 0.2, 0.6), 0.4));
         assert!(close(levels_fn(0.0, 0.0, 0.5, 1.0, 1.0, 0.0), 1.0));

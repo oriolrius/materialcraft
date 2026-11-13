@@ -7,9 +7,9 @@ pub(super) fn definition() -> NodeDefinition {
         .desc("Weighted sum of the RGBA channels.")
         .atomic()
         .color_in("input", "Input")
-        .float("red", "Red weight", 0.333, 0.0, 1.0)
-        .float("green", "Green weight", 0.333, 0.0, 1.0)
-        .float("blue", "Blue weight", 0.333, 0.0, 1.0)
+        .float("red", "Red weight", 1.0 / 3.0, 0.0, 1.0)
+        .float("green", "Green weight", 1.0 / 3.0, 0.0, 1.0)
+        .float("blue", "Blue weight", 1.0 / 3.0, 0.0, 1.0)
         .float("alpha", "Alpha weight", 0.0, 0.0, 1.0)
         .boolean("flatten_alpha", "Flatten alpha", false)
         .float("matte", "Matte level", 0.0, 0.0, 1.0)
@@ -23,7 +23,8 @@ fn grayscale_conversion(context: &CookContext) -> CookResult {
     let flatten = context.b("flatten_alpha");
     let matte = context.f("matte");
     Ok(vec![img.map(Kind::Gray, |p| {
-        let mut v = p[0] * w[0] + p[1] * w[1] + p[2] * w[2] + p[3] * w[3];
+        // Preserve the fused, ordered dot product through float image storage.
+        let mut v = p[3].mul_add(w[3], p[2].mul_add(w[2], p[1].mul_add(w[1], p[0] * w[0])));
         if flatten {
             v = v * p[3] + matte * (1.0 - p[3]);
         }

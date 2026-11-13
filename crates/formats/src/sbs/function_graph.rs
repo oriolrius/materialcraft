@@ -98,9 +98,6 @@ fn native_default(op: &str) -> Option<Value> {
     Some(match op {
         "const_float1" => Value::Float(0.0),
         "const_float4" => Value::Float4([0.0; 4]),
-        "swizzle2" | "iswizzle2" => Value::Int2([0; 2]),
-        "swizzle3" | "iswizzle3" => Value::Int3([0; 3]),
-        "swizzle4" | "iswizzle4" => Value::Int4([0; 4]),
         _ => return function::default_value(op),
     })
 }

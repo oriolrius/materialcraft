@@ -145,8 +145,17 @@ fn render_native(id: &str) -> Option<Vec<u8>> {
         })
         .collect();
     let params = resolve_params(def, &BTreeMap::new());
-    let ctx =
-        CookContext { w: LIBRARY_PREVIEW_SIZE, h: LIBRARY_PREVIEW_SIZE, seed: 3, tile: true, inputs: &inputs, params: &params, resource: &no_res, vars: &vars };
+    let ctx = CookContext {
+        format: materialcraft_engine::core::OutputFormat::U16,
+        w: LIBRARY_PREVIEW_SIZE,
+        h: LIBRARY_PREVIEW_SIZE,
+        seed: 3,
+        tile: true,
+        inputs: &inputs,
+        params: &params,
+        resource: &no_res,
+        vars: &vars,
+    };
     let imgs = (def.cook)(&ctx).ok()?;
     Some(imgs.first()?.resize(LIBRARY_PREVIEW_SIZE, LIBRARY_PREVIEW_SIZE, true).to_rgba8_display())
 }

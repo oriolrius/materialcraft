@@ -42,6 +42,9 @@ pub(super) fn render(context: &CookContext, stamps: &[PatternStamp], max_depth: 
         if !opacity.is_finite() {
             return Err("pattern roughness overflowed its depth opacity".into());
         }
+        // A scalar luminosity/opacity weights alpha as well as RGB. Its RGB
+        // already includes that weight, unlike a straight RGBA tint.
+        let source_alpha = if stamp.scalar_color { stamp.color[0] } else { stamp.color[3] };
 
         let (sine, cosine) = (stamp.rotation * std::f32::consts::TAU).sin_cos();
         let radius = [
@@ -64,9 +67,9 @@ pub(super) fn render(context: &CookContext, stamps: &[PatternStamp], max_depth: 
                         let point = render_region.point([x, y], [width, height]);
                         let delta = [point[0] - center[0], point[1] - center[1]];
                         let local = [(delta[0] * cosine + delta[1] * sine) * 2.0 / stamp.size[0], (-delta[0] * sine + delta[1] * cosine) * 2.0 / stamp.size[1]];
-                        // Half-open bounds give shared edges one owner, including subpixel quadrants.
+                        // The preceding quadrant owns a shared edge, including subpixel quadrants.
                         // Including both sides can add four adjacent stamps to the same pixel.
-                        if local.iter().any(|coordinate| *coordinate < -1.0 || *coordinate >= 1.0) {
+                        if local.iter().any(|coordinate| *coordinate <= -1.0 || *coordinate > 1.0) {
                             continue;
                         }
 
@@ -93,11 +96,12 @@ pub(super) fn render(context: &CookContext, stamps: &[PatternStamp], max_depth: 
                         for (channel, target) in target.iter_mut().enumerate() {
                             let image_alpha = if stamp.pattern >= 256 && !stamp.premultiplied && channel < 3 { pattern[3] } else { 1.0 };
                             let alpha = image_alpha * if kind == Kind::Color && channel < 3 { stamp.color[3] } else { 1.0 };
-                            let value = pattern[channel] * stamp.color[channel] * alpha * opacity;
+                            let tint = if channel == 3 { source_alpha } else { stamp.color[channel] };
+                            let value = pattern[channel] * tint * alpha * opacity;
                             *target = match stamp.blend {
                                 // Grayscale legacy maximum blends have no alpha channel to composite.
                                 1 if kind == Kind::Gray => target.max(value),
-                                1 => value + *target * (1.0 - (pattern[3] * stamp.color[3] * opacity).clamp(0.0, 1.0)),
+                                1 => value + *target * (1.0 - (pattern[3] * source_alpha * opacity).clamp(0.0, 1.0)),
                                 2 => target.max(value),
                                 _ => *target + value,
                             };

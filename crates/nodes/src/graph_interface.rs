@@ -37,6 +37,12 @@ pub fn output_type(graph: &Graph, id: NodeId, port: &str) -> u32 {
             continue;
         }
         let Ok(node) = graph.node(id) else { continue };
+        if node.def == "output"
+            && graph.input_of(id, "input").is_none()
+            && let Some(color) = node.params.get("color_mode").and_then(Value::as_bool)
+        {
+            return if color { 1 } else { 2 };
+        }
         if let Some(instance) = &node.instance {
             if instance.outputs.iter().any(|output| output.identifier == port && output.type_code == 1) {
                 return 1;

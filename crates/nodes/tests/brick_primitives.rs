@@ -6,7 +6,17 @@ use std::collections::BTreeMap;
 fn cook(def: &str, values: BTreeMap<String, Value>, inputs: &[Option<Image>]) -> Image {
     let definition = find(def).unwrap();
     let params = resolve_params(definition, &values);
-    let context = CookContext { w: 64, h: 64, seed: 0, tile: true, inputs, params: &params, resource: &|_| None, vars: &BTreeMap::new() };
+    let context = CookContext {
+        format: materialcraft_core::OutputFormat::F32,
+        w: 64,
+        h: 64,
+        seed: 0,
+        tile: true,
+        inputs,
+        params: &params,
+        resource: &|_| None,
+        vars: &BTreeMap::new(),
+    };
     (definition.cook)(&context).unwrap().remove(0)
 }
 

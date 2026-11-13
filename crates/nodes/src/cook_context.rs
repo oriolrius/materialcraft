@@ -7,6 +7,7 @@ pub struct CookContext<'a> {
     pub w: u32,
     pub h: u32,
     pub seed: u32,
+    pub format: materialcraft_core::OutputFormat,
     pub tile: bool,
     /// By input port order; `None` = not connected
     pub inputs: &'a [Option<Image>],

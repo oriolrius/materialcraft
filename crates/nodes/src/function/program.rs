@@ -39,7 +39,13 @@ impl Program {
         let mut remaining = MAX_EVALUATION_STEPS;
         let result = self.run(context, state, &mut remaining);
         *random = state.random;
-        result
+        let value = result?;
+        // Nested calls can return undefined intermediates to a caller that clamps
+        // them, but a completed parameter/value function must publish finite data.
+        if value.as_vec4().is_some_and(|components| components.iter().any(|value| !value.is_finite())) {
+            return Err("function produced a non-finite output".into());
+        }
+        Ok(value)
     }
 
     fn random_seed(&self, context: &EvaluationContext<'_>) -> u32 {

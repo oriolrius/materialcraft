@@ -13,6 +13,7 @@ mod node_output;
 mod node_result;
 mod node_size;
 mod options;
+mod output_precision;
 mod parameter;
 mod parameter_function;
 mod port;

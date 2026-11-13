@@ -11,7 +11,7 @@ pub(super) const FILTERS: &[FilterMap] = &[
         sbs: "blend",
         def: "blend",
         inputs: &[("source", "foreground"), ("destination", "background"), ("opacity", "mask")],
-        params: &[("blendingmode", "mode"), ("opacitymult", "opacity"), ("alphablending", "alpha")],
+        params: &[("blendingmode", "mode"), ("opacitymult", "opacity"), ("alphablending", "alpha"), ("colorblending", "color_blending")],
     },
     FilterMap { sbs: "blur", def: "blur", inputs: &[("input1", "input")], params: &[("intensity", "intensity")] },
     FilterMap {

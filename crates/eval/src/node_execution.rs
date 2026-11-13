@@ -111,7 +111,7 @@ pub(crate) fn cook_node(
         return fail(error, 0);
     }
 
-    if !node.functions.is_empty() || matches!(node.def.as_str(), "pixel_processor" | "value_processor" | "fx_map") {
+    if !node.functions.is_empty() || matches!(node.def.as_str(), "pixel_processor" | "value_processor" | "fx_map" | "transformation") {
         base.variables(variables.to_mut());
     }
 
@@ -172,9 +172,26 @@ pub(crate) fn cook_node(
     } else if matches!(node.def.as_str(), "output" | "dot") && incoming.first().and_then(Option::as_ref).is_some_and(|output| output.as_value().is_some()) {
         incoming.first().copied().flatten().cloned().map(|output| vec![output]).ok_or("missing value input".into())
     } else if let Some(image) = input_image {
-        let image = image.resize(w, h, tile);
-        let image = if node.def == "input_grayscale" { image.to_gray() } else { image };
-
+        let mut image = if node.def == "input_grayscale" && image.kind == Kind::Color {
+            // Grayscale input bridges use the default equal RGB weights, not
+            // display luminance. Preserve the fused order for float resources.
+            let weight = 1.0 / 3.0;
+            image.map(Kind::Gray, |pixel| [pixel[2].mul_add(weight, pixel[1].mul_add(weight, pixel[0] * weight)), 0.0, 0.0, 0.0])
+        } else if node.def == "input_color" {
+            image.to_color()
+        } else {
+            image.clone()
+        };
+        // Bound resources clamp at their edges and resize through stored factor-two levels.
+        // A single resize changes the edge filter; skipping storage conversion leaks HDR
+        // values through integer input bridges and changes subsequent function samples.
+        while image.w != w || image.h != h {
+            let next = |current: u32, target: u32| {
+                if current < target { current.saturating_mul(2).min(target) } else { current.div_ceil(2).max(target) }
+            };
+            image = crate::output_precision::apply(image.resize(next(image.w, w), next(image.h, h), false), base.format);
+        }
+        let image = crate::output_precision::apply(image, base.format);
         Ok(vec![NodeOutput::Image(image)])
     } else if node.def == materialcraft_core::MISSING_NODE {
         let name = if node.label.is_empty() { "this node" } else { node.label.as_str() };
@@ -183,8 +200,17 @@ pub(crate) fn cook_node(
     } else if node.def == "graph_instance" {
         cook_instance(package, graph_index, node, input_ports, output_ports, &incoming, &parameters, (w, h), base, options, cache)
     } else if let Some(definition) = definition {
-        let context = CookContext { w, h, seed, tile, inputs: &inputs, params: &parameters, resource: options.resource, vars: variables };
-        (definition.cook)(&context).map(|images| images.into_iter().map(NodeOutput::Image).collect())
+        let context = CookContext { format: base.format, w, h, seed, tile, inputs: &inputs, params: &parameters, resource: options.resource, vars: variables };
+        (definition.cook)(&context).map(|images| {
+            images
+                .into_iter()
+                .map(|image| {
+                    // Bridges retain their source pixels; filters store their declared precision.
+                    let image = if matches!(node.def.as_str(), "output" | "dot") { image } else { crate::output_precision::apply(image, base.format) };
+                    NodeOutput::Image(image)
+                })
+                .collect()
+        })
     } else {
         Err(format!("unknown node `{}`", node.def))
     };

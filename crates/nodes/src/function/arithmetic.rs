@@ -1,7 +1,7 @@
-use super::value_type::{dimensions, float_value, floats, integer_value, integers};
+use super::value_type::{dimensions, floats, integer_value, integers, intermediate_float_value as float_value};
 use materialcraft_core::Value;
 
-pub(crate) fn evaluate(op: &str, args: &[Value], random: &mut u32) -> Result<Value, String> {
+pub(crate) fn evaluate(op: &str, args: &[Value], random: &mut u32, scope: super::FunctionScope) -> Result<Value, String> {
     let first = args.first().ok_or("missing arithmetic operand")?;
     let count = dimensions(first);
     let integer = matches!(first, Value::Int(_) | Value::Int2(_) | Value::Int3(_) | Value::Int4(_));
@@ -65,7 +65,8 @@ pub(crate) fn evaluate(op: &str, args: &[Value], random: &mut u32) -> Result<Val
             "sub" => left - right,
             "mul" | "mulscalar" => left * right,
             "div" => left / right,
-            "mod" => left % right,
+            // Floored modulo wraps negative coordinates; remainder keeps their sign.
+            "mod" => left - right * (left / right).floor(),
             "neg" => -left,
             "abs" => left.abs(),
             "min" => left.min(right),
@@ -82,6 +83,8 @@ pub(crate) fn evaluate(op: &str, args: &[Value], random: &mut u32) -> Result<Val
             "cos" => left.cos(),
             "tan" => left.tan(),
             "lerp" => left + (right - left) * factor,
+            "rand" if scope == super::FunctionScope::Node => crate::random::node_function(random) * left,
+            "rand" if scope == super::FunctionScope::FxMap => crate::random::pattern_function(random) * left,
             "rand" => {
                 *random = crate::random::hash(random.wrapping_add(1));
                 (*random >> 8) as f32 / 16777216.0 * left

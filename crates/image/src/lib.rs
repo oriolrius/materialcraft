@@ -40,13 +40,19 @@ pub struct Image {
     pub w: u32,
     pub h: u32,
     pub kind: Kind,
+    /// Normalized integer textures use 16-bit filtered results in function samplers.
+    pub integer_sampling: bool,
     /// Row-major, `kind.channels()` floats per pixel.
     pub data: Arc<Vec<f32>>,
 }
 
 impl PartialEq for Image {
     fn eq(&self, o: &Image) -> bool {
-        self.w == o.w && self.h == o.h && self.kind == o.kind && (Arc::ptr_eq(&self.data, &o.data) || self.data == o.data)
+        self.w == o.w
+            && self.h == o.h
+            && self.kind == o.kind
+            && self.integer_sampling == o.integer_sampling
+            && (Arc::ptr_eq(&self.data, &o.data) || self.data == o.data)
     }
 }
 
@@ -70,7 +76,7 @@ impl Image {
             Kind::Gray => vec![v[0]; n],
             Kind::Color => v.iter().copied().cycle().take(n * 4).collect(),
         };
-        Image { w, h, kind, data: Arc::new(data) }
+        Image { w, h, kind, integer_sampling: false, data: Arc::new(data) }
     }
 
     /// Generate every pixel with `f(x, y)` (pixel indices) in parallel rows.
@@ -84,7 +90,7 @@ impl Image {
                 row[x * c..x * c + c].copy_from_slice(&p[..c]);
             }
         });
-        Image { w, h, kind, data: Arc::new(data) }
+        Image { w, h, kind, integer_sampling: false, data: Arc::new(data) }
     }
 
     /// Generate from normalized coordinates (pixel centers, 0..1).
@@ -108,7 +114,13 @@ impl Image {
     /// The pixel at integer coordinates (wrapped or clamped), as RGBA (gray → `[v, v, v, 1]`).
     #[inline]
     pub fn get(&self, x: i64, y: i64, tile: bool) -> [f32; 4] {
-        let (x, y) = (wrap(x, self.w, tile), wrap(y, self.h, tile));
+        self.get_axes(x, y, [tile; 2])
+    }
+
+    /// Read a texel with independent horizontal and vertical wrapping.
+    #[inline]
+    pub fn get_axes(&self, x: i64, y: i64, tiling: [bool; 2]) -> [f32; 4] {
+        let (x, y) = (wrap(x, self.w, tiling[0]), wrap(y, self.h, tiling[1]));
         let i = y * self.w as usize + x;
         match self.kind {
             Kind::Gray => {
@@ -135,6 +147,17 @@ impl Image {
     /// Bilinear sample at normalized `(u, v)`; pixel centers sit at `(i + 0.5) / w`.
     #[inline]
     pub fn sample(&self, u: f32, v: f32, tile: bool) -> [f32; 4] {
+        self.sample_axes(u, v, [tile; 2])
+    }
+
+    /// Bilinear sample with independent horizontal and vertical wrapping.
+    #[inline]
+    pub fn sample_axes(&self, u: f32, v: f32, tiling: [bool; 2]) -> [f32; 4] {
+        self.sample_filtered(u, v, tiling, false)
+    }
+
+    #[inline]
+    fn sample_filtered(&self, u: f32, v: f32, tiling: [bool; 2], fixed_weights: bool) -> [f32; 4] {
         let fx = u * self.w as f32 - 0.5;
         let fy = v * self.h as f32 - 0.5;
         if !fx.is_finite() || !fy.is_finite() {
@@ -143,12 +166,17 @@ impl Image {
         // Huge but finite coordinates would saturate the i64 cast and overflow at `+ 1`.
         let (fx, fy) = (fx.clamp(-1.0e9, 1.0e9), fy.clamp(-1.0e9, 1.0e9));
         let (x0, y0) = (fx.floor(), fy.floor());
-        let (tx, ty) = (fx - x0, fy - y0);
+        let (mut tx, mut ty) = (fx - x0, fy - y0);
+        if fixed_weights {
+            // Function texture reads use eight fractional bits for filter weights.
+            tx = (tx * 256.0).round() / 256.0;
+            ty = (ty * 256.0).round() / 256.0;
+        }
         let (x0, y0) = (x0 as i64, y0 as i64);
-        let a = self.get(x0, y0, tile);
-        let b = self.get(x0 + 1, y0, tile);
-        let c = self.get(x0, y0 + 1, tile);
-        let d = self.get(x0 + 1, y0 + 1, tile);
+        let a = self.get_axes(x0, y0, tiling);
+        let b = self.get_axes(x0 + 1, y0, tiling);
+        let c = self.get_axes(x0, y0 + 1, tiling);
+        let d = self.get_axes(x0 + 1, y0 + 1, tiling);
         let mut o = [0.0; 4];
         for k in 0..4 {
             let top = a[k] + (b[k] - a[k]) * tx;
@@ -167,15 +195,33 @@ impl Image {
         }
     }
 
+    /// Function texture reads use fixed filter weights and 16-bit integer results.
+    #[inline]
+    pub fn sample_stored(&self, u: f32, v: f32, tile: bool) -> [f32; 4] {
+        let pixel = self.sample_filtered(u, v, [tile; 2], true);
+        if self.integer_sampling {
+            // Eight-bit sources also retain sixteen bits after interpolation.
+            pixel.map(|value| (value.clamp(0.0, 1.0) * 65535.0).round() / 65535.0)
+        } else {
+            pixel
+        }
+    }
+
     /// Nearest sample at normalized `(u, v)`.
     #[inline]
     pub fn sample_nearest(&self, u: f32, v: f32, tile: bool) -> [f32; 4] {
+        self.sample_nearest_axes(u, v, [tile; 2])
+    }
+
+    /// Nearest sample with independent horizontal and vertical wrapping.
+    #[inline]
+    pub fn sample_nearest_axes(&self, u: f32, v: f32, tiling: [bool; 2]) -> [f32; 4] {
         let x = (u * self.w as f32).floor();
         let y = (v * self.h as f32).floor();
         if !x.is_finite() || !y.is_finite() {
             return [0.0, 0.0, 0.0, 1.0];
         }
-        self.get(x as i64, y as i64, tile)
+        self.get_axes(x as i64, y as i64, tiling)
     }
 
     /// Map every pixel (as RGBA) to a new image of `kind`, same size.

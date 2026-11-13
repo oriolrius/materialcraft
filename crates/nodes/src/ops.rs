@@ -88,7 +88,7 @@ fn box_1d(src: &Image, r: i64, horizontal: bool, tile: bool) -> Image {
             data[dst..dst + c].copy_from_slice(&vals[i * c..i * c + c]);
         }
     }
-    Image { w: src.w, h: src.h, kind: src.kind, data: Arc::new(data) }
+    Image { w: src.w, h: src.h, kind: src.kind, integer_sampling: false, data: Arc::new(data) }
 }
 
 /// Squared Euclidean distance (pixels) from every pixel to the nearest pixel where `inside` is
@@ -321,25 +321,45 @@ pub fn blend_channel(mode: i32, b: f32, f: f32) -> f32 {
 }
 
 /// Blend `fg` over `bg` with `mode`, weighted by `opacity` (0..1, already including any mask).
-/// `use_alpha`: the foreground's alpha also weights it.
+/// `blend_alpha`: composite coverage; false preserves background alpha.
 #[inline]
-pub fn blend_px(mode: i32, bg: [f32; 4], fg: [f32; 4], opacity: f32, use_alpha: bool, clamp: bool) -> [f32; 4] {
-    let t = opacity * if use_alpha { fg[3] } else { 1.0 };
+pub fn blend_px(mode: i32, bg: [f32; 4], fg: [f32; 4], opacity: f32, color_blending: i32, blend_alpha: bool, clamp: bool) -> [f32; 4] {
+    // Switch interpolates the RGBA tuple. Weighting it by source alpha again
+    // composites an already blended result a second time.
+    let t = opacity * if mode != 7 { fg[3] } else { 1.0 };
+    let coverage = bg[3] * (1.0 - t) + t;
     let mut o = [0.0; 4];
     for k in 0..3 {
-        let mut v = blend_channel(mode, bg[k], fg[k]);
+        let v = blend_channel(mode, bg[k], fg[k]);
+        // Weight both terms before adding. Subtracting first changes rounding at
+        // integer output boundaries, which compounds through noise remapping.
+        o[k] = match color_blending {
+            1 if mode != 7 => bg[k] * (1.0 - opacity) + v * opacity,
+            2 if mode != 7 && coverage > 0.0 => {
+                let v = if clamp { v.clamp(0.0, 1.0) } else { v };
+                (bg[k] * bg[3] * (1.0 - t) + fg[k] * t * (1.0 - bg[3]) + v * bg[3] * t) / coverage
+            }
+            2 if mode != 7 => bg[k],
+            3 if mode == 0 => bg[k] * (1.0 - t) + fg[k] * opacity,
+            _ => bg[k] * (1.0 - t) + v * t,
+        };
         if clamp {
-            v = v.clamp(0.0, 1.0);
+            o[k] = o[k].clamp(0.0, 1.0);
         }
-        o[k] = bg[k] + (v - bg[k]) * t;
     }
-    o[3] = if mode == 0 || mode == 7 { bg[3] + (fg[3] - bg[3]) * opacity } else { bg[3] };
+    o[3] = if mode == 7 {
+        bg[3] * (1.0 - opacity) + fg[3] * opacity
+    } else if blend_alpha || color_blending == 2 || (color_blending == 3 && mode == 0) {
+        coverage
+    } else {
+        bg[3]
+    };
     o
 }
 
 /// A gray image of the output size from per-pixel values.
 pub fn gray_from(w: u32, h: u32, v: Vec<f32>) -> Image {
-    Image { w, h, kind: Kind::Gray, data: Arc::new(v) }
+    Image { w, h, kind: Kind::Gray, integer_sampling: false, data: Arc::new(v) }
 }
 
 #[cfg(test)]

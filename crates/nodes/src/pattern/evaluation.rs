@@ -85,7 +85,6 @@ pub(crate) fn cook(context: &CookContext) -> CookResult {
         let scalar = |name: &str| parameters.get(name).and_then(Value::as_f32).unwrap_or(0.0);
         let integer = |name: &str| parameters.get(name).and_then(Value::as_i32).unwrap_or(0);
         let vector = |name: &str| parameters.get(name).and_then(Value::as_vec4).map(|value| [value[0], value[1]]).unwrap_or([0.0; 2]);
-        visit.seed = random;
         if parameters.get("randominherited").and_then(Value::as_bool) == Some(false) {
             visit.seed = integer("randomseed") as u32;
         }
@@ -111,6 +110,7 @@ pub(crate) fn cook(context: &CookContext) -> CookResult {
                         size: vector("patternsize").map(|size| size * visit.extent),
                         rotation: scalar("patternrotation"),
                         color,
+                        scalar_color: matches!(parameters.get("opacity"), Some(Value::Float(_))),
                         depth: visit.depth,
                         pattern,
                         variation: scalar("patternsuppl"),
@@ -120,14 +120,15 @@ pub(crate) fn cook(context: &CookContext) -> CookResult {
                     });
                 }
 
+                let mut child_random = visit.seed;
                 for (slot, child) in node.children.iter().enumerate() {
+                    let child_seed = crate::random::quadrant_child(&mut child_random, visit.depth.saturating_add(1));
                     if let Some(child) = child {
                         let mut child_visit = visit.clone();
                         child_visit.node = *child;
                         child_visit.depth = visit.depth.saturating_add(1);
                         child_visit.extent *= 0.5;
-                        // Repeated children need distinct streams even when their parent consumes no random values.
-                        child_visit.seed = crate::random::hash(visit.seed.wrapping_add(slot as u32 + 1));
+                        child_visit.seed = child_seed;
                         child_visit.center = [
                             visit.center[0] + (if slot & 1 == 0 { -0.25 } else { 0.25 }) * visit.extent,
                             visit.center[1] + (if slot & 2 == 0 { -0.25 } else { 0.25 }) * visit.extent,

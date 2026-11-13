@@ -14,7 +14,7 @@ fn an_omitted_native_uniform_color_is_black() {
 }
 
 #[test]
-fn native_gradient_default_midpoints_are_linear_and_colors_are_decoded_once() {
+fn native_gradient_default_midpoints_are_linear_and_components_are_preserved() {
     for color in [false, true] {
         let array = if color { "gradientrgba" } else { "gradientluminance" };
         let value = if color { "constantValueFloat4 v=\"0.5 0.25 0.75 0.4\"" } else { "constantValueFloat1 v=\"0.5\"" };
@@ -40,7 +40,7 @@ fn native_gradient_default_midpoints_are_linear_and_colors_are_decoded_once() {
         for _ in 0..3 {
             assert!(read.warnings.is_empty(), "{:?}", read.warnings);
             let Value::Gradient(gradient) = &read.pkg.graphs[0].nodes[0].params["gradient"] else { panic!("missing gradient") };
-            let end = if color { 0.21404114 } else { 0.5 };
+            let end = 0.5;
             assert!((gradient.eval(1.0)[0] - end).abs() < 1e-6);
             assert!((gradient.eval(0.5)[0] - end * 0.5).abs() < 1e-6);
             assert!((gradient.eval(0.5)[3] - if color { 0.4 } else { 1.0 }).abs() < 1e-6);

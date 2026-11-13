@@ -20,5 +20,5 @@ pub(crate) fn decode(bytes: &[u8], linear: bool) -> Result<Image> {
             }
         }
     }
-    Ok(Image { w: size.width, h: size.height, kind: Kind::Color, data: std::sync::Arc::new(data) })
+    Ok(Image { w: size.width, h: size.height, kind: Kind::Color, integer_sampling: false, data: std::sync::Arc::new(data) })
 }

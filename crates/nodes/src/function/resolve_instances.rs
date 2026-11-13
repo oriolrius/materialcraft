@@ -30,7 +30,7 @@ fn resolve(function: &mut FunctionGraph, local: &Package, sources: &BTreeMap<Str
                 return Err("Function Graph exceeds the 4096-node graph limit".into());
             }
             if stack.len() >= super::MAX_CALL_DEPTH || body.nodes.len() > *remaining {
-                return Err("Function instances exceed the 16-level or 65536-node expanded limit".into());
+                return Err(format!("Function instances exceed the {}-level or {}-node expanded limit", super::MAX_CALL_DEPTH, super::MAX_EXPANDED_NODES));
             }
 
             if graph.exposed.len() > 4096

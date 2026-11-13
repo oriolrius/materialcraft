@@ -15,7 +15,7 @@ pub(crate) fn image_key(i: &Image, cache: &Mutex<Cache>) -> u64 {
         .get(&ptr)
         .and_then(|saved| saved.buffer.upgrade().filter(|data| Arc::ptr_eq(data, &i.data) && saved.shape == shape).map(|_| saved.key))
     {
-        return key;
+        return key ^ hash_of(&i.integer_sampling);
     }
     let mut h = DefaultHasher::new();
     (shape, i.data.len()).hash(&mut h);
@@ -31,7 +31,7 @@ pub(crate) fn image_key(i: &Image, cache: &Mutex<Cache>) -> u64 {
         }
     }
     cache.input_hashes.insert(ptr, crate::input_fingerprint::InputFingerprint { buffer: Arc::downgrade(&i.data), shape, key });
-    key
+    key ^ hash_of(&i.integer_sampling)
 }
 
 pub(crate) fn hash_of(v: &impl Hash) -> u64 {

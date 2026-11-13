@@ -113,7 +113,7 @@ pub fn default_value(id: &str) -> Option<Value> {
         "swizzle2" | "iswizzle2" => Value::Int2([0, 1]),
         "swizzle3" | "iswizzle3" => Value::Int3([0, 1, 2]),
         "swizzle4" | "iswizzle4" => Value::Int4([0, 1, 2, 3]),
-        "samplecol" | "samplelum" => Value::Int2([0, 1]),
+        "samplecol" | "samplelum" => Value::Int2([0, 0]),
         "while" => Value::Int(100),
         _ => return None,
     })

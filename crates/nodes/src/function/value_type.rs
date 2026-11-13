@@ -45,7 +45,16 @@ pub fn float_value(values: &[f32]) -> Result<Value, String> {
     if values.iter().any(|v| !v.is_finite()) {
         return Err("operation produced a non-finite number".into());
     }
+    float_components(values)
+}
 
+pub(crate) fn intermediate_float_value(values: &[f32]) -> Result<Value, String> {
+    // All runtime function scopes can clamp an infinite/NaN intermediate.
+    // Public evaluation boundaries validate the final result instead.
+    float_components(values)
+}
+
+fn float_components(values: &[f32]) -> Result<Value, String> {
     Ok(match values {
         [a] => Value::Float(*a),
         [a, b] => Value::Float2([*a, *b]),

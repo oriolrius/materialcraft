@@ -41,7 +41,7 @@ pub fn decode(bytes: &[u8], linear: bool) -> Result<Image> {
     if gray {
         let l = img.into_luma16();
         let data: Vec<f32> = l.pixels().map(|p| p.0[0] as f32 / 65535.0).collect();
-        return Ok(Image { w, h, kind: Kind::Gray, data: Arc::new(data) });
+        return Ok(Image { w, h, kind: Kind::Gray, integer_sampling: false, data: Arc::new(data) });
     }
 
     let mut data = img.into_rgba32f().into_raw();
@@ -52,7 +52,7 @@ pub fn decode(bytes: &[u8], linear: bool) -> Result<Image> {
             }
         }
     }
-    Ok(Image { w, h, kind: Kind::Color, data: Arc::new(data) })
+    Ok(Image { w, h, kind: Kind::Color, integer_sampling: false, data: Arc::new(data) })
 }
 
 /// Encode `img` as `ext` (see [`EXPORT_FORMATS`]). `srgb`: color values are written through the sRGB curve (base color); data maps (normal, roughness…) are written linear

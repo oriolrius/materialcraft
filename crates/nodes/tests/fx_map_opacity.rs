@@ -23,7 +23,17 @@ fn render(depth: usize, roughness: f32, stack: bool, color: Option<[f32; 4]>) ->
             ("background".into(), Value::Color([0.0; 4])),
         ]),
     );
-    let context = CookContext { w: 64, h: 64, seed: 0, tile: true, inputs: &[], params: &params, resource: &|_| None, vars: &BTreeMap::new() };
+    let context = CookContext {
+        format: materialcraft_core::OutputFormat::F32,
+        w: 64,
+        h: 64,
+        seed: 0,
+        tile: true,
+        inputs: &[],
+        params: &params,
+        resource: &|_| None,
+        vars: &BTreeMap::new(),
+    };
     (definition.cook)(&context).unwrap().remove(0)
 }
 

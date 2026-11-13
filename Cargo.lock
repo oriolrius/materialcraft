@@ -2687,6 +2687,7 @@ dependencies = [
 name = "materialcraft-eval"
 version = "0.1.3"
 dependencies = [
+ "half",
  "materialcraft-core",
  "materialcraft-image",
  "materialcraft-nodes",

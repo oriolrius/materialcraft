@@ -17,7 +17,7 @@ impl ResolvedBaseParameters {
         let parent = options.parent_base;
         Self {
             size: parent.map_or_else(|| graph.size_px(), |base| base.size),
-            seed: parent.map_or((graph.seed as u32).wrapping_mul(0x9e37_79b9), |base| base.seed),
+            seed: parent.map_or(graph.seed as u32, |base| base.seed),
             format: parent.map_or(graph.format, |base| base.format),
             tiling: graph.tiling_mode.resolve(graph.tiling, options.parent_tiling, options.parent_tiling.unwrap_or(graph.tiling)),
             pixel_ratio: graph.pixel_ratio_mode.resolve(graph.pixel_ratio, options.parent_pixel_ratio, options.parent_pixel_ratio.unwrap_or(graph.pixel_ratio)),
@@ -27,8 +27,13 @@ impl ResolvedBaseParameters {
 
     pub(crate) fn resolve(base: &BaseParameters, input: Option<Self>, parent: Self) -> Self {
         let size_base = BaseParameter::OutputSize.inheritance(base).resolve([1; 2], input.map(|base| base.size), parent.size);
-        let size = std::array::from_fn(|axis| (f64::from(size_base[axis]) * 2f64.powi(base.size[axis].clamp(-12, 13))).round().clamp(16.0, 8192.0) as u32);
-        let inherited_seed = base.seed_mode.resolve(0, input.map(|base| base.seed), parent.seed);
+        // Internal reductions and lookup images can reach one texel. Applying
+        // the graph editor's 16-pixel minimum here breaks their size functions.
+        let size = std::array::from_fn(|axis| (f64::from(size_base[axis]) * 2f64.powi(base.size[axis].clamp(-12, 13))).round().clamp(1.0, 8192.0) as u32);
+        // Images carry size and format, but do not carry a random stream.
+        // Both relative seed modes use the containing graph's seed; chaining
+        // image filters must not accumulate the seeds of upstream nodes.
+        let inherited_seed = base.seed_mode.resolve(0, None, parent.seed);
         let inherited_pixel_size = base.pixel_size_mode.resolve([1.0; 2], input.map(|base| base.pixel_size), parent.pixel_size);
         Self {
             size,

@@ -79,6 +79,7 @@ fn base_parameter_assignments_reach_pixel_functions_without_leaking_to_other_nod
     function.output = Some(function.add("get_float1", &[], Some(Value::Text("prepared_value".into()))));
     let mut graph = Graph::new("Parameter scope");
     graph.size = [4; 2];
+    graph.format = materialcraft_core::OutputFormat::F32;
     let initialized = graph.add_node("pixel_processor", [0.0; 2]);
     let isolated = graph.add_node("pixel_processor", [100.0; 2]);
     for id in [initialized, isolated] {
@@ -421,6 +422,7 @@ fn linear_input_images_and_bitmap_nodes_request_data_reads() {
     let mut p = Package::new("p");
     let mut g = Graph::new("g");
     g.size = [4, 4];
+    g.format = materialcraft_core::OutputFormat::F32;
     let i = g.add_node("input_color", [0.0, 0.0]);
     g.node_mut(i).unwrap().params.insert("identifier".into(), Value::Text("n".into()));
     let b = g.add_node("bitmap", [0.0, 100.0]);
@@ -541,7 +543,7 @@ fn cooked_parameters_retain_values_without_processor_graph_copies() {
 }
 
 #[test]
-fn enabled_generators_use_parent_size_and_inherit_other_input_base_parameters() {
+fn enabled_generators_use_parent_size_and_seed_with_input_image_properties() {
     use materialcraft_core::{BaseParameter, FunctionGraph, OutputFormat, ParameterInheritance, SizeMode, ValueType};
 
     for definition in ["svg", "fx_map"] {
@@ -583,7 +585,7 @@ fn enabled_generators_use_parent_size_and_inherit_other_input_base_parameters() 
             assert_eq!(result.error, None, "{definition}");
             assert_eq!(result.base.size, [64, 32], "{definition}, dynamic: {dynamic}");
             assert_eq!(cooked.image(generator, 0).map(|image| (image.w, image.h)), Some((16, 8)));
-            assert_eq!(result.base.seed, 17);
+            assert_eq!(result.base.seed, 0);
             assert_eq!(result.base.format, OutputFormat::F32);
             assert_eq!(result.base.tiling, [false, true]);
             assert_eq!(result.base.pixel_ratio, 1);

@@ -14,7 +14,8 @@ use super::type_code;
 use super::warnings::Warnings;
 use super::xml::{child_element, child_value, children_named, parse_floats};
 use materialcraft_core::{
-    ComponentUsage, Connection, ExposedParameter, Graph, MAX_SIZE_LOG2, MIN_SIZE_LOG2, MISSING_NODE, Node, NodeId, Package, Resource, ResourceBytes, Value,
+    BaseParameter, ComponentUsage, Connection, ExposedParameter, Graph, MAX_SIZE_LOG2, MIN_SIZE_LOG2, MISSING_NODE, Node, NodeId, OutputFormat, Package,
+    ParameterInheritance, Resource, ResourceBytes, Value,
 };
 use materialcraft_nodes::find;
 use roxmltree::Node as XmlNode;
@@ -163,6 +164,7 @@ impl<'text> SbsReader<'text, '_> {
     pub(super) fn read_graph(&mut self, element: XmlNode<'_, 'text>, name: String) -> Graph {
         let mut graph = Graph::new(&name);
         let base = read_base_params(child_element(element, "baseParameters"), self.warnings);
+        graph.format = if BaseParameter::Format.inheritance(&base) == ParameterInheritance::Absolute { base.format } else { OutputFormat::Inherit };
         graph.seed = base.seed;
         graph.pixel_ratio = base.pixel_ratio;
         graph.pixel_ratio_mode = base.pixel_ratio_mode;
@@ -368,7 +370,7 @@ impl<'text> SbsReader<'text, '_> {
         graph: &mut Graph,
         comp_node: XmlNode<'_, 'text>,
         image_inputs: &HashMap<String, InputBridge>,
-        outputs: &HashMap<String, (String, u32)>,
+        outputs: &HashMap<String, (String, u32, u32)>,
     ) -> ReadNode {
         let gpos = child_element(comp_node, "GUILayout").and_then(|l| child_value(l, "gpos")).map(parse_floats).unwrap_or_default();
         let pos = [gpos.first().copied().unwrap_or(0.0) - NODE_HALF_SIZE[0], gpos.get(1).copied().unwrap_or(0.0) - NODE_HALF_SIZE[1]];
@@ -414,11 +416,14 @@ impl<'text> SbsReader<'text, '_> {
             }
             "compOutputBridge" => {
                 let output = child_value(implementation, "output").unwrap_or("");
-                let (identifier, usage) = outputs.get(output).cloned().unwrap_or_else(|| ("output".into(), ComponentUsage::ANY_INDEX));
+                let (identifier, usage, channels) = outputs.get(output).cloned().unwrap_or_else(|| ("output".into(), ComponentUsage::ANY_INDEX, 1));
                 let (id, index, node) = push_node(graph, "output", pos);
                 if let Some(node) = node {
                     node.params.insert("identifier".into(), Value::Text(identifier));
                     node.params.insert("usage".into(), Value::Enum(usage));
+                    if matches!(channels, 1 | 2) {
+                        node.params.insert("color_mode".into(), Value::Bool(channels == 1));
+                    }
                 }
                 let inputs = HashMap::from([("inputNodeOutput".to_string(), "input".to_string())]);
                 ReadNode { id, index, inputs, outputs: Vec::new(), open_inputs: false }
@@ -431,8 +436,30 @@ impl<'text> SbsReader<'text, '_> {
                         let (id, index, node) = push_node(graph, filter.def, pos);
                         if let Some(node) = node {
                             self.read_filter_params(node, filter, params, &graph_name);
+                            // Native files can omit the color switch while declaring a color
+                            // output. Retain that compiled image type instead of the editor preset.
+                            if let [(_, gray)] = output_uids.as_slice()
+                                && find(filter.def).is_some_and(|definition| {
+                                    matches!(definition.param("color_mode").map(|parameter| &parameter.default), Some(Value::Bool(_)))
+                                })
+                                && !node.params.contains_key("color_mode")
+                                && !node.functions.contains_key("color_mode")
+                                && !node.bindings.contains_key("color_mode")
+                            {
+                                node.params.insert("color_mode".into(), Value::Bool(!gray));
+                            }
                             super::parameter_array::read(node, implementation);
                             node.base = read_base_params(params, self.warnings);
+                            if filter.sbs == "pixelprocessor"
+                                && !params
+                                    .into_iter()
+                                    .flat_map(|parameters| children_named(parameters, "parameter"))
+                                    .any(|p| child_value(p, "name") == Some("format"))
+                            {
+                                // A processor defaults to its parent format, even with an image input.
+                                node.base.format = OutputFormat::U8;
+                                node.base.format_mode = ParameterInheritance::RelativeToParent;
+                            }
                             if filter.sbs == "fxmaps"
                                 && let Some(pattern) = child_element(implementation, "paramsGraphs").and_then(|graphs| child_element(graphs, "paramsGraph"))
                             {
@@ -565,6 +592,11 @@ impl<'text> SbsReader<'text, '_> {
             // An omitted SBS output color is black; the editor's new-node preset is gray.
             node.params.insert("color".into(), Value::Color([0.0, 0.0, 0.0, 1.0]));
         }
+        if filter.sbs == "normal" {
+            // Native files omit these defaults; the editor's new-node preset differs.
+            node.params.insert("opengl".into(), Value::Bool(false));
+            node.params.insert("height_alpha".into(), Value::Bool(true));
+        }
 
         let filter_params: Vec<XmlNode> =
             params.into_iter().flat_map(|p| children_named(p, "parameter")).filter(|p| !BASE_PARAMS.contains(&child_value(*p, "name").unwrap_or(""))).collect();
@@ -645,12 +677,13 @@ pub(super) fn push_node<'g>(graph: &'g mut Graph, def: &str, pos: [f32; 2]) -> (
     let index = graph.nodes.len() - 1;
     (id, index, graph.nodes.last_mut())
 }
-pub(super) fn read_graph_outputs(element: XmlNode) -> HashMap<String, (String, u32)> {
+pub(super) fn read_graph_outputs(element: XmlNode) -> HashMap<String, (String, u32, u32)> {
     let mut outputs = HashMap::new();
     for output in child_element(element, "graphOutputs").into_iter().flat_map(|o| children_named(o, "graphoutput")) {
         let identifier = child_value(output, "identifier").unwrap_or("output").to_string();
         let usage = component_usage::read(output);
-        outputs.insert(child_value(output, "uid").unwrap_or("").to_string(), (identifier, usage));
+        let channels = child_value(output, "channels").and_then(|value| value.parse().ok()).unwrap_or(1);
+        outputs.insert(child_value(output, "uid").unwrap_or("").to_string(), (identifier, usage, channels));
     }
     outputs
 }
