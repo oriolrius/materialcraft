@@ -112,7 +112,22 @@ Resource paths resolve beside their owning package: `resources/tile.png` in
 the library root. Filesystem resolution checks the canonical target to prevent escaping that root.
 Native saves inside the library retain loaded resource links and write ordinary relative paths;
 ordinary project saves copy resource bytes alongside the package, and byte-only saves embed them.
-Unavailable resources retain their reference and missing state.
+Unavailable resources retain their reference and missing state. Font resources first load their
+embedded data or their file relative to the SBS package, including user-supplied `cour.ttf`.
+Only a missing font uses `sbs://resources/LiberationMono-Regular.ttf`. The same precedence applies
+to direct Text font references and unresolved package font references; a blank reference keeps the
+built-in stroke font. Empty embedded data and empty files do not hide later font sources. If the
+fallback is also unavailable, the original SBS font name and reference remain available for repair.
+Resource loading and round trips preserve these fonts; the Text cook does not yet rasterize external fonts.
+
+The formats build reads Liberation Mono Regular and its OFL notice from the optional
+`CRAFT_FONTS_DIR/fonts/latin-manifest.txt` catalog, verifies its checksum, and embeds only that
+face for native and web builds. Font binaries stay in craft-fonts. Set `CRAFT_FONTS_REQUIRED=1`
+for releases to fail on an unavailable fallback. Without the optional input, builds still work;
+a missing font produces a repairable resource and a load warning. A checkout with the Latin
+catalog is required (for example craft-fonts revision `c1db6d1a8ed772191241c3d185e2104be84d8691`).
+All bundled `.sbs` packages, including nested materials, are original clean-room recreations
+covered together in [ATTRIBUTION.md](../ATTRIBUTION.md); their other resources retain separate credits.
 Bitmap/SVG references into another package import only the requested resource declarations,
 resolving asset paths beside that owner. These become local resource snapshots with distinct
 names on collisions; saving retains shared asset links inside the library or carries their bytes

@@ -20,11 +20,10 @@ fn package(content: &str, foreign: &str) -> String {
 }
 
 #[test]
-fn surface_and_font_resources_use_library_replacements_before_embedded_or_external_data() {
+fn surface_resources_use_library_replacements_before_embedded_or_external_data() {
     for (file, format, expected, filter, parameter, key) in [
         ("sbs://resources/sun.surface", "surface", "sun.exr", "bitmap", "bitmapresourcepath", "resource"),
         ("../textures/arbitrary.SURFACE", "surface", "arbitrary.exr", "bitmap", "bitmapresourcepath", "resource"),
-        (r"C:\fonts\COUR.TTF", "ttf", "cursor.otf", "text", "fontdata", "fontdata"),
     ] {
         // Valid old embedded data must not take precedence over the requested replacement.
         let mut original = materialcraft_core::Package::new("Old");
@@ -98,32 +97,16 @@ fn foreign_font_binding_is_imported_once_and_round_trips() {
     let foreign = package(&resource("../fonts/cour.ttf", "ttf", ""), "");
     let read = read_sbs(xml.as_bytes(), "example.sbs", &|path| match path {
         "nested/fonts.sbs" => Some(foreign.as_bytes().to_vec()),
-        "sbs://resources/cursor.otf" => Some(vec![4, 5, 6]),
+        "sbs://resources/LiberationMono-Regular.ttf" => Some(vec![4, 5, 6]),
         _ => None,
     })
     .unwrap();
     assert!(read.warnings.is_empty(), "{:?}", read.warnings);
     assert_eq!(read.pkg.resources.len(), 1);
-    assert_eq!(read.pkg.resources[0].file, "cursor.otf");
+    assert_eq!(read.pkg.resources[0].file, "LiberationMono-Regular.ttf");
     assert_eq!(read.pkg.graphs[0].nodes[0].params["fontdata"], Value::Text("asset".into()));
     let reopened = read_sbs(&write_sbs(&read.pkg).unwrap(), "moved.sbs", &|_| None).unwrap();
     assert!(reopened.warnings.is_empty(), "{:?}", reopened.warnings);
     assert_eq!(reopened.pkg.graphs[0].nodes[0].params["fontdata"], Value::Text("asset".into()));
     assert_eq!(reopened.pkg.resources[0].bytes.as_slice(), &[4, 5, 6]);
-}
-
-#[test]
-fn direct_font_filename_is_replaced_but_unrelated_fonts_are_preserved() {
-    for file in ["cour.ttf", "sbs://resources/cour.ttf", r"C:\Fonts\cour.ttf"] {
-        let xml = package(&node("text", "fontdata", file), "");
-        let read = read_sbs(xml.as_bytes(), "example.sbs", &|path| (path == "sbs://resources/cursor.otf").then(|| vec![7])).unwrap();
-        assert!(read.warnings.is_empty(), "{:?}", read.warnings);
-        assert_eq!(read.pkg.resources.len(), 1);
-        assert_eq!(read.pkg.resources[0].file, "cursor.otf");
-        assert_eq!(read.pkg.graphs[0].nodes[0].params["fontdata"], Value::Text(read.pkg.resources[0].name.clone()));
-    }
-    let xml = package(&node("text", "fontdata", "mycour.ttf"), "");
-    let read = read_sbs(xml.as_bytes(), "example.sbs", &|_| panic!("unrelated font should not be read")).unwrap();
-    assert!(read.pkg.resources.is_empty());
-    assert_eq!(read.pkg.graphs[0].nodes[0].params["fontdata"], Value::Text("mycour.ttf".into()));
 }

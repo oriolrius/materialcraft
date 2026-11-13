@@ -2,6 +2,13 @@
 
 include!(concat!(env!("OUT_DIR"), "/sbs_assets.rs"));
 
+/// Shared fallback for missing SBS font resources; supplied by the optional craft-fonts build input.
+pub const FALLBACK_FONT: &str = "sbs://resources/LiberationMono-Regular.ttf";
+
+fn is_shared_font_asset(relative: &str) -> bool {
+    matches!(relative, "resources/LiberationMono-Regular.ttf" | "resources/OFL-LiberationMono.txt")
+}
+
 /// Validate alias paths before joining a filesystem root. No package may escape the library.
 pub fn relative_path(uri: &str) -> Result<&str, String> {
     let path = uri.strip_prefix("sbs://").ok_or("not an SBS library alias")?;
@@ -78,6 +85,10 @@ pub fn contains_file(path: &std::path::Path) -> bool {
 /// Read a validated library alias from the configured directory or the embedded fallback.
 pub fn read(uri: &str) -> Result<Vec<u8>, String> {
     let relative = relative_path(uri)?;
+    // These assets live in craft-fonts, so a source checkout's SBS directory cannot supply them.
+    if is_shared_font_asset(relative) {
+        return read_embedded(relative).map_err(|error| format!("{error}; build with CRAFT_FONTS_DIR containing Liberation Mono Regular"));
+    }
     #[cfg(not(target_arch = "wasm32"))]
     {
         let root = root();
@@ -165,9 +176,12 @@ mod tests {
     fn embedded_library_contains_every_disk_asset() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/sbs");
         for (relative, _, _) in EMBEDDED_ASSETS {
+            if is_shared_font_asset(relative) {
+                assert_eq!(read(&format!("sbs://{relative}")).unwrap(), read_embedded(relative).unwrap());
+                continue;
+            }
             assert_eq!(read_embedded(relative).unwrap(), std::fs::read(root.join(relative)).unwrap(), "{relative}");
         }
-        assert!(read_embedded("resources/cursor.otf").unwrap().starts_with(b"OTTO"));
     }
 
     /// Discovered packages have unique valid aliases and the embedded fallback is present.

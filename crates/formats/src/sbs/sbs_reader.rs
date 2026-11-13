@@ -98,13 +98,15 @@ impl<'text> SbsReader<'text, '_> {
             .and_then(|copy| child_value(copy, "filename"))
             .filter(|path| !path.is_empty())
             .or_else(|| child_value(item, "filepath"));
+        let font = kind == "font" || super::resource_replacement::is_font(&fallback_filename) || external.is_some_and(super::resource_replacement::is_font);
         let mut bytes: Option<Vec<u8>> = None;
         let mut loaded_source = "";
         let mut why_missing = String::new();
 
         if let Some(embedded) = source.and_then(|s| child_element(s, "binembedded")) {
             match decode_embedded(child_value(embedded, "strdata").unwrap_or("")) {
-                Ok(data) => bytes = Some(data),
+                Ok(data) if !font || !data.is_empty() => bytes = Some(data),
+                Ok(_) => why_missing = "its embedded font data is empty".into(),
                 Err(e) => why_missing = format!("its embedded data is damaged ({e})"),
             }
         }
@@ -118,14 +120,24 @@ impl<'text> SbsReader<'text, '_> {
                 }
 
                 match linked(file) {
-                    Some(data) => {
+                    Some(data) if !font || !data.is_empty() => {
                         bytes = Some(data);
                         loaded_source = file;
                         break;
                     }
+                    Some(_) => why_missing = format!("its font file `{file}` is empty"),
                     None => why_missing = format!("its file `{file}` was not found next to the package"),
                 }
             }
+        }
+
+        // A supplied font, including cour.ttf or embedded data, always wins. Only absence uses the shared fallback.
+        if font && bytes.is_none() {
+            if let Some(name) = super::resource_replacement::load_font(pkg, identifier, path, linked) {
+                return name;
+            }
+            let why = if why_missing.is_empty() { "it has no font data" } else { &why_missing };
+            why_missing = format!("{why}; fallback `{}` is unavailable", super::library::FALLBACK_FONT);
         }
 
         let taken: Vec<String> = pkg.resources.iter().map(|r| r.name.clone()).collect();
@@ -143,7 +155,13 @@ impl<'text> SbsReader<'text, '_> {
             None => {
                 let why = if why_missing.is_empty() { "it has no data".to_string() } else { why_missing };
                 let extension = if kind == "svg" { "svg" } else { &format };
-                let mut resource = Resource::new(name.clone(), crate::safe_file_name(&format!("{name}.{extension}")), ResourceBytes::new(Vec::new()));
+                let filename = format!("{name}.{extension}");
+                let filename = if font {
+                    external.and_then(|path| path.rsplit(['/', '\\']).next()).filter(|file| !file.is_empty()).unwrap_or(&filename)
+                } else {
+                    &filename
+                };
+                let mut resource = Resource::new(name.clone(), crate::safe_file_name(filename), ResourceBytes::new(Vec::new()));
                 resource.source = external.unwrap_or("").into();
                 resource.folder = path.rsplit_once('/').map_or("", |(folder, _)| folder).into();
                 pkg.resources.push(resource);
@@ -645,24 +663,33 @@ impl<'text> SbsReader<'text, '_> {
         }
     }
 
-    fn resource_binding(&mut self, url: &str, graph_name: &str) -> Option<String> {
+    pub(super) fn resource_name(&self, url: &str) -> Option<&String> {
         if let Some(name) = self.direct_resource_names.get(url) {
+            return Some(name);
+        }
+        let dependency_uid = url.split_once('?').and_then(|(_, query)| query.split('&').find_map(|part| part.strip_prefix("dependency=")));
+        if dependency_uid.is_some_and(|uid| !self.dependencies.contains_key(uid)) {
+            return None;
+        }
+        let (path, dependency) = self.resolve_reference(url);
+        match dependency.filter(|file| file != SELF_DEPENDENCY) {
+            Some(file) => self.external_resource_names.get(&(file, path)),
+            None => self.resource_names.get(&path),
+        }
+    }
+
+    fn resource_binding(&mut self, url: &str, graph_name: &str) -> Option<String> {
+        if let Some(name) = self.resource_name(url) {
             return Some(name.clone());
         }
         let dependency_uid = url.split_once('?').and_then(|(_, query)| query.split('&').find_map(|part| part.strip_prefix("dependency=")));
         if let Some(uid) = dependency_uid.filter(|uid| !self.dependencies.contains_key(*uid)) {
             self.warnings.add(format!("graph `{graph_name}`: resource reference has unknown dependency `{uid}`"));
-            return None;
-        }
-        let (path, dependency) = self.resolve_reference(url);
-        let name = match dependency.filter(|file| file != SELF_DEPENDENCY) {
-            Some(file) => self.external_resource_names.get(&(file, path.clone())),
-            None => self.resource_names.get(&path),
-        };
-        if name.is_none() {
+        } else {
+            let (path, _) = self.resolve_reference(url);
             self.warnings.add(format!("graph `{graph_name}`: Node uses resource `{path}`, which is not in the package"));
         }
-        name.cloned()
+        None
     }
 }
 pub(super) fn unique_name(taken: &[String], base: &str) -> String {

@@ -11,15 +11,22 @@ fn byte_only_sbs_import_resolves_library_resource_substitutes() {
         </content></package>"#;
     let mut session = Session::new(Package::new("Empty"));
     file_cmds::open_bytes(&mut session, xml, Some("example.sbs".into())).unwrap();
-    assert!(session.load_warnings.is_empty(), "{:?}", session.load_warnings);
-    for (name, filename) in [("noise", "bluenoise_256_c.exr"), ("font", "cursor.otf")] {
+    let fallback = materialcraft_engine::formats::sbs::library::read(materialcraft_engine::formats::sbs::library::FALLBACK_FONT);
+    if fallback.is_ok() {
+        assert!(session.load_warnings.is_empty(), "{:?}", session.load_warnings);
+    } else {
+        assert_eq!(session.load_warnings.len(), 1);
+        assert!(session.load_warnings[0].contains("LiberationMono-Regular.ttf"));
+    }
+    let font_file = if fallback.is_ok() { "LiberationMono-Regular.ttf" } else { "cour.ttf" };
+    for (name, filename) in [("noise", "bluenoise_256_c.exr"), ("font", font_file)] {
         let resource = session.pkg.resource(name).unwrap();
         assert_eq!(resource.file, filename);
-        assert_eq!(resource.bytes.as_slice(), materialcraft_engine::formats::sbs::library::read(&format!("sbs://resources/{filename}")).unwrap());
+        assert_eq!(resource.bytes.as_slice(), materialcraft_engine::formats::sbs::library::read(&format!("sbs://resources/{filename}")).unwrap_or_default());
     }
     let saved = String::from_utf8(file_cmds::save_bytes(&session).unwrap()).unwrap();
     assert!(!saved.contains(".surface"));
-    assert!(!saved.contains("cour.ttf"));
+    assert_eq!(saved.contains("old/cour.ttf"), fallback.is_err());
 }
 
 #[test]

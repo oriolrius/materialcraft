@@ -8,6 +8,9 @@ use std::{
 };
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
+#[path = "build/sbs_font.rs"]
+mod sbs_font;
+
 fn scan(root: &Path, folder: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
     if folder.components().count() > 6 || files.len() > 4096 {
         return Err("bundled library exceeds its scan limits".into());
@@ -44,13 +47,14 @@ fn main() -> Result<()> {
     std::fs::create_dir_all(&compressed)?;
     let mut files = Vec::new();
     scan(&root, Path::new(""), &mut files)?;
-    files.sort_by_key(|path| path.to_string_lossy().replace('\\', "/"));
+    let mut files: Vec<_> = files.into_iter().map(|relative| (relative.clone(), root.join(relative))).collect();
+    files.extend(sbs_font::assets()?);
+    files.sort_by_key(|(relative, _)| relative.to_string_lossy().replace('\\', "/"));
     let mut assets = String::from("const EMBEDDED_ASSETS: &[(&str, &[u8], usize)] = &[\n");
     let mut packages = String::from("pub const BUNDLED: &[&str] = &[\n");
-    for (index, relative) in files.iter().enumerate() {
-        let file = root.join(relative);
+    for (index, (relative, file)) in files.iter().enumerate() {
         let mut bytes = Vec::new();
-        std::fs::File::open(&file)?.take((256 << 20) + 1).read_to_end(&mut bytes)?;
+        std::fs::File::open(file)?.take((256 << 20) + 1).read_to_end(&mut bytes)?;
         if bytes.len() > 256 << 20 {
             return Err("bundled asset exceeds 256 MiB".into());
         }

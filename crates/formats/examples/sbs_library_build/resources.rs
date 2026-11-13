@@ -35,7 +35,12 @@ const RECIPES: &[Recipe] = &[
     Recipe { key: "shuf4_64_32", path: "resources/shuf4_64_32.exr", extension: "exr", description: "Four-channel 64 by 32 floating-point sampling lookup." },
     Recipe { key: "sun", path: "resources/sun.exr", extension: "exr", description: "512 by 16 solar coefficient lookup. All RGBA channels are numeric data." },
     Recipe { key: "moss01_bmp", path: "resources/moss01_bmp.bmp", extension: "bmp", description: "Moss texture for coverage and surface detail." },
-    Recipe { key: "courier_new", path: "resources/cursor.otf", extension: "otf", description: "Monospaced OpenType font for point-preview labels." },
+    Recipe {
+        key: "courier_new",
+        path: "resources/LiberationMono-Regular.ttf",
+        extension: "ttf",
+        description: "Liberation Mono Regular fallback from craft-fonts for missing point-preview fonts.",
+    },
     Recipe {
         key: "DoorFrame",
         path: "resources/DoorFrame.svg",
@@ -95,7 +100,7 @@ pub fn notices(key: &str) -> &'static [&'static str] {
         "scratch_damage" | "leather" | "scratched_metal" | "moss01_bmp" => &["LICENSE_NICK_ROSE.txt"],
         "bluenoise_256" | "bluenoise_256_c" => &["LICENSE_BLUE_NOISE.txt"],
         "shuf4_64_32" | "sun" => &["LICENSE_HOSEK_WILKIE.txt", "sun_lookup_readme.txt"],
-        "courier_new" => &["GUST-FONT-LICENSE.txt", "LPPL-1.3c.txt", "README-TeX-Gyre-Cursor.txt", "MANIFEST-TeX-Gyre-Cursor.txt"],
+        "courier_new" => &["OFL-LiberationMono.txt"],
         _ => &[],
     }
 }

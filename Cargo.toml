@@ -101,6 +101,8 @@ craft-window = { git = "https://github.com/storytold/craft-libs", rev = "1b34eba
 craft-update = { git = "https://github.com/storytold/craft-libs", rev = "1b34eba41e62138fc2438d2734523b302840b45d", features = ["egui"] }
 # Atomic persistence, at the suite's existing revision.
 craft-atomic = { git = "https://github.com/storytold/craft-libs", rev = "1b34eba41e62138fc2438d2734523b302840b45d" }
+# Parse the optional shared font catalog at build time; the font repository is not a dependency.
+craft-fonts-build = { git = "https://github.com/storytold/craft-libs", rev = "1b34eba41e62138fc2438d2734523b302840b45d" }
 
 # egui 0.37 and winit: the suite's forks (storytold/egui, storytold/winit), as craft-libs pins them.
 [patch.crates-io]

@@ -58,7 +58,7 @@ fn linked_resources_retain_the_successful_path_but_embedded_resources_do_not_lin
     let saved = write_sbs(&read.pkg).unwrap();
     let saved = String::from_utf8(saved).unwrap();
     assert!(saved.contains("<type v=\"font\"/>"));
-    let saved = saved.replace("<filepath v=\"\"/>", "<filepath v=\"stale.ttf\"/>");
+    let saved = saved.replace("<filepath v=\"\"/>", "<filepath v=\"fonts/cour.ttf\"/>");
     let embedded = read_sbs(saved.as_bytes(), "saved.sbs", &|_| None).unwrap();
     assert!(embedded.warnings.is_empty(), "{:?}", embedded.warnings);
     assert!(embedded.pkg.resources[0].source.is_empty());

@@ -2,7 +2,7 @@
 <!--
   MaterialCraft MSI (WiX Toolset v5: `dotnet tool install -g wix`). Built by package.ps1:
 
-    wix build materialcraft.wxs -arch x64 -d Version=1.2.3 -d BinDir=... -d IconPath=... -o out.msi
+    wix build materialcraft.wxs -arch x64 -d Version=1.2.3 -d BinDir=... -d DocsDir=... -d IconPath=... -o out.msi
 
   Per-machine install into Program Files, a Start Menu shortcut, `.mcraft` owned by MaterialCraft,
   and MaterialCraft offered under "Open with" for the mesh formats it opens (without taking over
@@ -42,10 +42,14 @@
 
     <Feature Id="Main" Title="MaterialCraft" Level="1">
       <ComponentGroupRef Id="MaterialCraftFiles" />
+      <ComponentGroupRef Id="MaterialCraftDocumentation" />
     </Feature>
   </Package>
 
   <Fragment>
+    <ComponentGroup Id="MaterialCraftDocumentation" Directory="INSTALLFOLDER">
+      <Files Include="$(var.DocsDir)\**" />
+    </ComponentGroup>
     <ComponentGroup Id="MaterialCraftFiles" Directory="INSTALLFOLDER">
       <Component Id="MaterialCraftApp">
         <File Id="MaterialCraftExe" Source="$(var.BinDir)\materialcraft.exe" KeyPath="yes">

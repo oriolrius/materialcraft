@@ -78,7 +78,7 @@ fn references_are_relative_portable_and_confined_to_the_library() {
 #[test]
 fn resource_names_survive_and_surface_replacements_declare_their_actual_formats() {
     for (key, original, expected, format) in [
-        ("courier_new", "cour.ttf", "cursor.otf", "otf"),
+        ("courier_new", "cour.ttf", "LiberationMono-Regular.ttf", "ttf"),
         ("moss01_bmp", "moss01_bmp.bmp", "moss01_bmp.bmp", "bmp"),
         ("bluenoise_256_c", "bluenoise_256_c.surface", "bluenoise_256_c.exr", "exr"),
         ("shuf4_64_32", "shuf4_64_32.surface", "shuf4_64_32.exr", "exr"),
@@ -124,6 +124,10 @@ fn library_art_is_decodable_without_reading_source_assets() {
 fn curated_resources_keep_the_supplied_bytes_and_required_notices() {
     for key in ["bluenoise_256", "bluenoise_256_c", "sun", "shuf4_64_32", "courier_new", "scratch_damage", "leather", "scratched_metal", "moss01_bmp"] {
         let recipe = resources::recipe(key).unwrap();
+        if key == "courier_new" && materialcraft_formats::sbs::library::read(&format!("sbs://{}", recipe.path)).is_err() {
+            assert!(resources::load(key).is_err(), "a build without craft-fonts cannot export its font");
+            continue;
+        }
         let bytes = resources::load(key).unwrap();
         let supplied = materialcraft_formats::sbs::library::read(&format!("sbs://{}", recipe.path)).unwrap();
         assert!(bytes == supplied, "converter replaced the supplied bytes for {key}");
@@ -132,7 +136,9 @@ fn curated_resources_keep_the_supplied_bytes_and_required_notices() {
             assert!(!materialcraft_formats::sbs::library::read(&format!("sbs://resources/{notice}")).unwrap().is_empty());
         }
     }
-    assert!(resources::load("courier_new").unwrap().starts_with(b"OTTO"));
+    if let Ok(font) = resources::load("courier_new") {
+        assert!(font.starts_with(b"\0\x01\0\0"));
+    }
     let shuffled = image::load_from_memory(&resources::load("shuf4_64_32").unwrap()).unwrap().into_rgba32f();
     assert_eq!(shuffled.dimensions(), (64, 32));
     assert!(shuffled.as_raw().iter().all(|v| v.is_finite()));

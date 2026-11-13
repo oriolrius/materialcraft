@@ -29,3 +29,5 @@ resvg = { workspace = true }
 
 [build-dependencies]
 flate2 = { workspace = true }
+craft-fonts-build = { workspace = true }
+sha2 = { workspace = true }

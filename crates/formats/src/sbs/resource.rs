@@ -7,7 +7,7 @@ pub(super) fn write(content: &mut String, resource: &Resource, writer: &mut SbsW
     let file = resource.file.to_ascii_lowercase();
     let kind = if file.ends_with(".svg") {
         "svg"
-    } else if file.ends_with(".ttf") || file.ends_with(".otf") {
+    } else if super::resource_replacement::is_font(&file) {
         "font"
     } else {
         "bitmap"
