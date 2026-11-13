@@ -40,6 +40,12 @@ input images, resource bytes and (for instances) the sub-graph: equal keys hit t
 re-cooks only the nodes downstream of it, and undo finds earlier results again. A failing node shows
 a magenta image and its error; nodes after it still cook.
 
+The editor's output cache retains at most 256 MiB and 8192 entries; decoded resource images
+retain at most 128 MiB and 128 entries. Both evict least-recently-used data. An image larger than
+its cache budget serves the current cook without being retained in that cache. These are cache
+limits, not a limit on total process memory: open documents, undo, loaded library graphs, active
+cook results and GPU textures have their own lifetimes.
+
 Each cook builds a borrowed `core::GraphIndex` for node and connection lookups. `PreparedGraph`
 resolves the needed nodes' ports once; `graph_execution` schedules them and `node_execution` handles
 a single node. Parameter resolution, graph instances, value execution, output collection and cache
@@ -124,6 +130,12 @@ the tree out (`formats::sbs::read_layout`): each node inside a frame becomes an 
 as missing until a package in the folder provides it. Installed and browser builds embed all SBS
 packages and shared resources, compressed at build time. Library packages share a flat dependency
 registry; only sources reachable from open packages refresh their instance interfaces on edits.
+
+Library thumbnails cook one visible graph at a time, with 32 MiB of output caching and 16 MiB
+of decoded-image caching. Only output dependencies are evaluated. Editing takes priority, and
+leaving a tile or reloading the library cancels its cook between nodes. The next job waits for
+that worker to finish; hidden tiles cannot accumulate queued work or workers. At most 256
+finished previews retain GPU textures (about 5 MiB of pixels).
 
 The local `sbs_library_build` example converts native XML without a model round trip, checking that
 computational fields survive presentation edits and reference rewriting. It generates independent

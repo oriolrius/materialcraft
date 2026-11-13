@@ -11,9 +11,14 @@ pub struct Cache {
     pub(crate) input_hashes: HashMap<usize, crate::input_fingerprint::InputFingerprint>,
 }
 
+#[cfg(test)]
+#[path = "cache.test.rs"]
+mod tests;
+
 impl Default for Cache {
     fn default() -> Self {
-        Cache::new(1 << 30)
+        // Active graph results are retained separately; history must not reserve a gigabyte.
+        Cache::new(256 << 20)
     }
 }
 
@@ -41,7 +46,7 @@ impl Cache {
     }
 
     pub(crate) fn get(&mut self, key: u64) -> Option<Arc<Vec<NodeOutput>>> {
-        self.tick += 1;
+        self.tick = self.tick.saturating_add(1);
         let t = self.tick;
         self.entries.get_mut(&key).map(|e| {
             e.2 = t;
@@ -50,17 +55,23 @@ impl Cache {
     }
 
     pub(crate) fn put(&mut self, key: u64, v: Arc<Vec<NodeOutput>>) {
-        let size: usize = v.iter().map(NodeOutput::memory_bytes).sum();
-        self.tick += 1;
-        if let Some(old) = self.entries.insert(key, (v, size, self.tick)) {
+        let size = v.iter().fold(0_usize, |total, output| total.saturating_add(output.memory_bytes()));
+        if let Some(old) = self.entries.remove(&key) {
             self.bytes = self.bytes.saturating_sub(old.1);
         }
-        self.bytes += size;
-        while self.bytes > self.cap && self.entries.len() > 1 {
+        // An oversized result remains owned by its cook, never by this cache. Empty results
+        // are not worth retaining and otherwise permit unbounded zero-byte metadata.
+        if size == 0 || size > self.cap {
+            return;
+        }
+        while self.bytes > self.cap - size || self.entries.len() >= 8192 {
             let Some((&k, _)) = self.entries.iter().min_by_key(|(_, e)| e.2) else { break };
             if let Some(e) = self.entries.remove(&k) {
                 self.bytes = self.bytes.saturating_sub(e.1);
             }
         }
+        self.tick = self.tick.saturating_add(1);
+        self.entries.insert(key, (v, size, self.tick));
+        self.bytes += size;
     }
 }

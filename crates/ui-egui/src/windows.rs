@@ -76,7 +76,7 @@ thread_local! {
 }
 
 pub fn show(app: &mut MaterialCraftApp, ctx: &egui::Context) {
-    app.thumbs.tick(ctx);
+    app.thumbs.tick(ctx, &app.session.library, app.cooker.busy() || app.session.dirty);
     if app.ui.windows.new_graph {
         new_graph(app, ctx);
     }

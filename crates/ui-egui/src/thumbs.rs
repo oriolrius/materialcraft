@@ -29,91 +29,9 @@ pub fn color_image(img: &Image, side: u32) -> ColorImage {
     ColorImage::from_rgba_unmultiplied([side as usize, side as usize], &small.to_rgba8_display())
 }
 
-/// Previews of library graphs: one worker cooks the requested graphs, newest request first
-#[derive(Default)]
-struct GraphPreviews {
-    /// The library the previews were cooked from; a reload starts over
-    library: Option<std::sync::Arc<materialcraft_engine::NodeLibrary>>,
-    /// Requested graphs: `None` while cooking and for graphs without an image
-    textures: HashMap<(String, String), Option<TextureHandle>>,
-    requests: GraphRequests,
-    results: GraphResults,
-}
-
-impl GraphPreviews {
-    fn get(&mut self, ctx: &egui::Context, library: &std::sync::Arc<materialcraft_engine::NodeLibrary>, package: &str, graph: &str) -> Option<egui::TextureId> {
-        if !self.library.as_ref().is_some_and(|current| std::sync::Arc::ptr_eq(current, library)) {
-            *self = GraphPreviews { library: Some(library.clone()), ..GraphPreviews::default() };
-            (self.requests, self.results) = spawn_graph_previews(ctx.clone(), library.clone());
-        }
-
-        let key = (package.to_string(), graph.to_string());
-        if let Some(texture) = self.textures.get(&key) {
-            return texture.as_ref().map(TextureHandle::id);
-        }
-
-        if let Some(requests) = &self.requests {
-            let _ = requests.send(key.clone());
-        }
-        self.textures.insert(key, None);
-        None
-    }
-
-    /// Upload the previews the worker finished since the last frame
-    fn collect(&mut self, ctx: &egui::Context) {
-        let Some(results) = &self.results else { return };
-
-        for ((package, graph), rgba) in results.try_iter() {
-            let texture = rgba.map(|rgba| {
-                let image = ColorImage::from_rgba_unmultiplied([LIBRARY_PREVIEW_SIZE as usize, LIBRARY_PREVIEW_SIZE as usize], &rgba);
-                ctx.load_texture(format!("library-graph-{package}#{graph}"), image, TextureOptions::LINEAR)
-            });
-            self.textures.insert((package, graph), texture);
-        }
-    }
-}
-
-type GraphRequests = Option<std::sync::mpsc::Sender<(String, String)>>;
-type GraphResults = Option<Receiver<((String, String), Option<Vec<u8>>)>>;
-
-/// Start the worker that cooks requested library graphs; it ends when the requests' sender is dropped
-#[cfg(not(target_arch = "wasm32"))]
-fn spawn_graph_previews(ctx: egui::Context, library: std::sync::Arc<materialcraft_engine::NodeLibrary>) -> (GraphRequests, GraphResults) {
-    let (request_tx, request_rx) = std::sync::mpsc::channel::<(String, String)>();
-    let (result_tx, result_rx) = std::sync::mpsc::channel();
-    let worker = std::thread::Builder::new().name("materialcraft-library-graphs".into()).spawn(move || {
-        let mut waiting = Vec::new();
-        loop {
-            // The tiles scrolled into view last are cooked first
-            waiting.extend(request_rx.try_iter());
-            let next = match waiting.pop() {
-                Some(next) => next,
-                None => match request_rx.recv() {
-                    Ok(next) => next,
-                    Err(_) => return,
-                },
-            };
-
-            let image = materialcraft_engine::NodeLibrary::preview(&library, &next.0, &next.1, LIBRARY_PREVIEW_SIZE);
-            let rgba = image.map(|image| image.resize(LIBRARY_PREVIEW_SIZE, LIBRARY_PREVIEW_SIZE, true).to_rgba8_display());
-            if result_tx.send((next, rgba)).is_err() {
-                return;
-            }
-            ctx.request_repaint();
-        }
-    });
-
-    match worker {
-        Ok(_) => (Some(request_tx), Some(result_rx)),
-        Err(_) => (None, None),
-    }
-}
-
-/// The browser build has no worker thread: library graphs keep their category icon
-#[cfg(target_arch = "wasm32")]
-fn spawn_graph_previews(_ctx: egui::Context, _library: std::sync::Arc<materialcraft_engine::NodeLibrary>) -> (GraphRequests, GraphResults) {
-    (None, None)
-}
+#[path = "graph_previews.rs"]
+mod graph_previews;
+use graph_previews::GraphPreviews;
 
 impl Thumbs {
     pub fn clear_nodes(&mut self) {
@@ -134,7 +52,7 @@ impl Thumbs {
     }
 
     /// Once per frame: forget thumbnails unused for a few seconds; collect library previews
-    pub fn tick(&mut self, ctx: &egui::Context) {
+    pub fn tick(&mut self, ctx: &egui::Context, library: &std::sync::Arc<materialcraft_engine::NodeLibrary>, foreground_busy: bool) {
         self.frame += 1;
         let f = self.frame;
         if self.nodes.len() > 256 {
@@ -149,7 +67,7 @@ impl Thumbs {
             }
             self.library_rx = None;
         }
-        self.graphs.collect(ctx);
+        self.graphs.collect(ctx, library, foreground_busy);
     }
 
     /// The preview of library graph `graph` of `package`, cooked in the background on first use;

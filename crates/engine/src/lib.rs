@@ -4,6 +4,7 @@
 #[cfg(test)]
 extern crate self as materialcraft_engine;
 
+mod decoded_images;
 mod document_path;
 mod evaluation_environment_commands;
 mod explorer_clipboard;

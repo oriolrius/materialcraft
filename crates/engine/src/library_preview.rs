@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use materialcraft_core::Package;
 use materialcraft_image::{Image, Kind};
@@ -18,19 +19,38 @@ impl NodeLibrary {
     /// colors and its normal map on the graph's inputs. `None` when the graph has no output that
     /// cooks or its image is one flat value
     pub fn preview(library: &Arc<NodeLibrary>, package: &str, graph: &str, size: u32) -> Option<Image> {
+        Self::preview_cancellable(library, package, graph, size, &AtomicBool::new(false))
+    }
+
+    /// Stop stale library work between nodes when its tile leaves the visible panel.
+    pub fn preview_cancellable(library: &Arc<NodeLibrary>, package: &str, graph: &str, size: u32, cancel: &AtomicBool) -> Option<Image> {
+        if cancel.load(Ordering::Relaxed) {
+            return None;
+        }
         let source = library.packages.get(package)?;
         let index = source.graphs.iter().position(|candidate| candidate.function.is_none() && candidate.sbs_path() == graph)?;
+        let size = size.clamp(1, COOKED_SIZE);
 
         // A session links the graph's instances and functions to the library, as an opened package gets
-        let session = Session::with_library(Package::clone(source), library.clone());
+        let mut session = Session::with_library(Package::clone(source), library.clone());
+        session.limit_preview_caches();
+        if cancel.load(Ordering::Relaxed) {
+            return None;
+        }
         let graph = session.pkg.graphs.get(index)?;
         let decode = session.resource_decoder();
         let mut options = materialcraft_eval::Options::new(&decode);
         // Thin lines and fine grain vanish when cooked at thumbnail size, so the graph cooks larger and is scaled down
         let cooked_size = size.max(COOKED_SIZE);
         options.max_size = Some(cooked_size);
+        options.cancel = Some(cancel);
+        // Unconnected experiments and intermediate previews do not contribute to a library tile.
+        options.only = Some(graph.nodes.iter().filter(|node| node.def == "output").map(|node| node.id).collect());
         options.inputs = sample_inputs(graph, cooked_size);
         let cooked = materialcraft_eval::cook(&session.pkg, index, &options, &session.cache);
+        if cooked.cancelled || cancel.load(Ordering::Relaxed) {
+            return None;
+        }
 
         let outputs = materialcraft_eval::outputs(graph, &cooked);
         let base_color = outputs.iter().find(|(_, usage, _, image)| *usage == "baseColor" && image.is_some());

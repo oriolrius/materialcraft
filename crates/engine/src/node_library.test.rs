@@ -305,3 +305,36 @@ fn library_graphs_cook_previews_from_sample_inputs() {
     assert!(preview("sbs://blur_hq.sbs", "no_such_graph").is_none());
     assert!(preview("sbs://functions.sbs", "Functions/Math/Pi").is_none(), "a function has no image");
 }
+
+#[test]
+#[ignore = "repeated bundled preview cooks; run explicitly for memory profiling"]
+fn repeated_library_previews_release_images_and_source_references() {
+    let library = Arc::new(NodeLibrary::load(&library::files()));
+    let references: Vec<_> = library.packages.values().map(Arc::strong_count).collect();
+    for cycle in 0..12 {
+        for (package, graph) in
+            [("sbs://blur_hq.sbs", "blur_hq"), ("sbs://noise_clouds_3_v2.sbs", "clouds_3"), ("sbs://materials/pbr/bricks_001.sbs", "bricks_001")]
+        {
+            let image = NodeLibrary::preview(&library, package, graph, 72).unwrap_or_else(|| panic!("missing preview {package}#{graph}"));
+            let buffer = Arc::downgrade(&image.data);
+            drop(image);
+            assert!(buffer.upgrade().is_none(), "a completed thumbnail must release its image after upload");
+            assert_eq!(Arc::strong_count(&library), 1);
+            assert_eq!(library.packages.values().map(Arc::strong_count).collect::<Vec<_>>(), references);
+        }
+        println!("completed preview cycle {cycle}");
+        #[cfg(target_os = "linux")]
+        if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+            let memory: Vec<_> = status.lines().filter(|line| line.starts_with("VmRSS:") || line.starts_with("VmHWM:")).collect();
+            println!("{}", memory.join(", "));
+        }
+    }
+}
+
+#[test]
+fn cancelled_library_previews_stop_before_preparing_the_package() {
+    let library = Arc::new(NodeLibrary::default());
+    let cancelled = std::sync::atomic::AtomicBool::new(true);
+    assert!(NodeLibrary::preview_cancellable(&library, "unused", "unused", 72, &cancelled).is_none());
+    assert_eq!(Arc::strong_count(&library), 1);
+}
