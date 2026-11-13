@@ -1,11 +1,10 @@
 use std::collections::{BTreeMap, HashMap};
-use std::sync::mpsc::Receiver;
 
 use egui::{ColorImage, TextureHandle, TextureOptions};
 use materialcraft_engine::image::{Image, Kind};
 use materialcraft_engine::nodes::{CookContext, catalog, resolve_params};
 
-/// Rendered previews by id: (id, RGBA8 pixels)
+/// Rendered previews by id: (id, RGBA8 pixels).
 pub type Previews = Vec<(String, Vec<u8>)>;
 
 /// Side of node thumbnails and library previews, in pixels
@@ -16,10 +15,9 @@ const LIBRARY_PREVIEW_SIZE: u32 = 72;
 pub struct Thumbs {
     /// (cook key, port) → texture and the frame it was last used
     nodes: HashMap<(u64, usize), (TextureHandle, u64)>,
-    library: HashMap<String, TextureHandle>,
-    library_rx: Option<Receiver<Previews>>,
-    library_started: bool,
-    persist_library: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    persistence: Option<preview_cache_settings::Maintenance>,
+    clear_epoch: u64,
     graphs: GraphPreviews,
     frame: u64,
 }
@@ -34,15 +32,31 @@ pub fn color_image(img: &Image, side: u32) -> ColorImage {
 mod graph_previews;
 use graph_previews::GraphPreviews;
 #[cfg(not(target_arch = "wasm32"))]
+#[path = "preview_cache_settings.rs"]
+mod preview_cache_settings;
+#[cfg(not(target_arch = "wasm32"))]
 #[path = "preview_disk_cache.rs"]
 mod preview_disk_cache;
 
 impl Thumbs {
     /// Opt in only for a native app window; offscreen harnesses never use the user's cache.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn enable_persistence(&mut self) {
-        self.persist_library = true;
-        self.graphs.persist = true;
+    pub fn enable_persistence(&mut self, prefs: materialcraft_engine::LibraryCachePrefs) {
+        let persistence = preview_cache_settings::Maintenance::new(prefs);
+        self.graphs.persistence = Some(persistence.settings.clone());
+        self.persistence = Some(persistence);
+    }
+
+    pub fn configure_cache(&mut self, _prefs: materialcraft_engine::LibraryCachePrefs, clear_epoch: u64) {
+        let clear = clear_epoch != self.clear_epoch;
+        self.clear_epoch = clear_epoch;
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(persistence) = &self.persistence {
+            persistence.settings.update(_prefs.into(), clear);
+        }
+        if clear {
+            self.graphs.clear();
+        }
     }
 
     pub fn clear_nodes(&mut self) {
@@ -63,22 +77,18 @@ impl Thumbs {
     }
 
     /// Once per frame: forget thumbnails unused for a few seconds; collect library previews
-    pub fn tick(&mut self, ctx: &egui::Context, library: &std::sync::Arc<materialcraft_engine::NodeLibrary>, foreground_busy: bool) {
+    pub fn tick(&mut self, ctx: &egui::Context, library: &std::sync::Arc<materialcraft_engine::NodeLibrary>, foreground_busy: bool) -> Option<String> {
         self.frame += 1;
         let f = self.frame;
         if self.nodes.len() > 256 {
             self.nodes.retain(|_, (_, used)| f - *used < 120);
         }
-        if let Some(rx) = &self.library_rx
-            && let Ok(list) = rx.try_recv()
-        {
-            for (id, rgba) in list {
-                let img = ColorImage::from_rgba_unmultiplied([LIBRARY_PREVIEW_SIZE as usize, LIBRARY_PREVIEW_SIZE as usize], &rgba);
-                self.library.insert(id.clone(), ctx.load_texture(format!("library-{id}"), img, TextureOptions::LINEAR));
-            }
-            self.library_rx = None;
-        }
+        #[cfg(not(target_arch = "wasm32"))]
+        let error = self.persistence.as_mut().and_then(|persistence| persistence.tick(ctx));
+        #[cfg(target_arch = "wasm32")]
+        let error = None;
         self.graphs.collect(ctx, library, foreground_busy);
+        error
     }
 
     /// The preview of library graph `graph` of `package`, cooked in the background on first use;
@@ -95,11 +105,7 @@ impl Thumbs {
 
     /// The library preview of node `def` (generated in the background on first use)
     pub fn library(&mut self, ctx: &egui::Context, def: &str) -> Option<egui::TextureId> {
-        if !self.library_started {
-            self.library_started = true;
-            self.library_rx = Some(spawn_library_previews(ctx.clone(), self.persist_library));
-        }
-        self.library.get(def).map(TextureHandle::id)
+        self.graphs.native(ctx, def)
     }
 }
 
@@ -113,87 +119,34 @@ fn sample_inputs() -> (Image, Image, Image) {
     (gray, color, normal)
 }
 
-fn previews(_persist: bool) -> Previews {
+fn render_native(id: &str) -> Option<Vec<u8>> {
+    let def = catalog().iter().find(|def| def.id == id && def.id != "graph_instance")?;
     let (gray, color, normal) = sample_inputs();
     let no_res = |_: &str| None;
     let vars = BTreeMap::new();
-    let mut out = Vec::new();
-    #[cfg(not(target_arch = "wasm32"))]
-    let disk = _persist.then(preview_disk_cache::PreviewDiskCache::configured).flatten();
-    for def in catalog() {
-        if def.id == "graph_instance" {
-            continue;
-        }
-        let render = || {
-            let inputs: Vec<Option<Image>> = def
-                .inputs
-                .iter()
-                .enumerate()
-                .map(|(i, p)| {
-                    // Masks and secondary inputs stay empty so the main effect shows
-                    if i > 0 && !matches!(def.id, "blend" | "height_blend" | "normal_blend" | "rgba_merge") {
-                        return None;
-                    }
-                    Some(if p.id.contains("normal") || def.category.contains("Normal") && p.kind == materialcraft_engine::nodes::PortKind::Color {
-                        normal.clone()
-                    } else if p.kind == materialcraft_engine::nodes::PortKind::Color {
-                        color.clone()
-                    } else if i == 1 {
-                        gray.map(Kind::Gray, |v| [1.0 - v[0], 0.0, 0.0, 0.0])
-                    } else {
-                        gray.clone()
-                    })
-                })
-                .collect();
-            let params = resolve_params(def, &BTreeMap::new());
-            let ctx = CookContext {
-                w: LIBRARY_PREVIEW_SIZE,
-                h: LIBRARY_PREVIEW_SIZE,
-                seed: 3,
-                tile: true,
-                inputs: &inputs,
-                params: &params,
-                resource: &no_res,
-                vars: &vars,
-            };
-            let imgs = (def.cook)(&ctx).ok()?;
-            Some(imgs.first()?.resize(LIBRARY_PREVIEW_SIZE, LIBRARY_PREVIEW_SIZE, true).to_rgba8_display())
-        };
-        #[cfg(not(target_arch = "wasm32"))]
-        let rgba = {
-            use sha2::Digest;
-            match &disk {
-                Some(disk) => disk.get_or_render(
-                    sha2::Sha256::digest(format!("materialcraft-atomic-preview-v1:{}", def.id)).into(),
-                    LIBRARY_PREVIEW_SIZE,
-                    &std::sync::atomic::AtomicBool::new(false),
-                    render,
-                ),
-                None => render(),
+    let inputs: Vec<Option<Image>> = def
+        .inputs
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            // Masks and secondary inputs stay empty so the main effect shows.
+            if i > 0 && !matches!(def.id, "blend" | "height_blend" | "normal_blend" | "rgba_merge") {
+                return None;
             }
-        };
-        #[cfg(target_arch = "wasm32")]
-        let rgba = render();
-        if let Some(rgba) = rgba {
-            out.push((def.id.to_string(), rgba));
-        }
-    }
-    out
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn spawn_library_previews(ctx: egui::Context, persist: bool) -> Receiver<Previews> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    let _ = std::thread::Builder::new().name("materialcraft-library".into()).spawn(move || {
-        let _ = tx.send(previews(persist));
-        ctx.request_repaint();
-    });
-    rx
-}
-
-#[cfg(target_arch = "wasm32")]
-fn spawn_library_previews(_ctx: egui::Context, persist: bool) -> Receiver<Previews> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    let _ = tx.send(previews(persist));
-    rx
+            Some(if p.id.contains("normal") || def.category.contains("Normal") && p.kind == materialcraft_engine::nodes::PortKind::Color {
+                normal.clone()
+            } else if p.kind == materialcraft_engine::nodes::PortKind::Color {
+                color.clone()
+            } else if i == 1 {
+                gray.map(Kind::Gray, |v| [1.0 - v[0], 0.0, 0.0, 0.0])
+            } else {
+                gray.clone()
+            })
+        })
+        .collect();
+    let params = resolve_params(def, &BTreeMap::new());
+    let ctx =
+        CookContext { w: LIBRARY_PREVIEW_SIZE, h: LIBRARY_PREVIEW_SIZE, seed: 3, tile: true, inputs: &inputs, params: &params, resource: &no_res, vars: &vars };
+    let imgs = (def.cook)(&ctx).ok()?;
+    Some(imgs.first()?.resize(LIBRARY_PREVIEW_SIZE, LIBRARY_PREVIEW_SIZE, true).to_rgba8_display())
 }

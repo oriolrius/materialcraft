@@ -262,6 +262,9 @@ fn handle_inner(app: &mut MaterialCraftApp, ctx: &egui::Context, method: &str, p
                     if id == "view.previewSize" {
                         app.ui.prefs.preview_size = app.session.preview_size.unwrap_or(0);
                     }
+                    if id == "library.cache.configure" {
+                        app.ui.prefs.library_cache = app.session.library_cache_prefs;
+                    }
                     if id == "session.history" {
                         app.ui.prefs.history = app.session.history_prefs;
                     }
@@ -469,6 +472,28 @@ mod tests {
         assert!(!app.ui.prefs.thumbnails);
         assert_eq!(app.ui.prefs.ui_scale, 1.5);
         assert_eq!(app.ui.prefs.autosave_minutes, 9);
+    }
+
+    #[test]
+    fn cache_commands_and_saved_preferences_stay_in_sync() {
+        let mut app = app();
+        let ctx = egui::Context::default();
+        let reply = handle(&mut app, &ctx, "command.run", &json!({"id": "library.cache.configure", "params": {"diskMib": 256, "maxPreviews": 8000}}));
+        assert_eq!(reply["ok"], json!(true), "{reply}");
+        app.apply_prefs();
+        assert_eq!(app.ui.prefs.library_cache, app.session.library_cache_prefs);
+        assert_eq!(app.ui.prefs.library_cache.disk_mib, 256);
+        let saved: crate::UiState = serde_json::from_value(serde_json::to_value(&app.ui).unwrap()).unwrap();
+        let mut restored = MaterialCraftApp::headless(materialcraft_engine::sample_session(), saved);
+        assert_eq!(restored.session.library_cache_prefs, app.session.library_cache_prefs);
+        let reply = handle(&mut restored, &ctx, "ui.set", &json!({"prefs": {"libraryCache": {"diskMib": 32}}}));
+        assert_eq!(reply["ok"], json!(true), "{reply}");
+        restored.apply_prefs();
+        assert_eq!(restored.session.library_cache_prefs.disk_mib, 32);
+        assert_eq!(restored.session.library_cache_prefs.max_previews, 8000);
+        let reply = handle(&mut restored, &ctx, "command.run", &json!({"id": "library.cache.clear"}));
+        assert_eq!(reply["ok"], json!(true), "{reply}");
+        assert_eq!(restored.session.library_cache_clear_epoch, 1);
     }
 
     #[test]

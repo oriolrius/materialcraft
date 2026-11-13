@@ -91,6 +91,7 @@ pub fn session(session: &Session, requested_graph: Option<usize>) -> J {
         "dirty": session.dirty,
         "history": session.history(),
         "historyPreferences": session.history_prefs,
+        "libraryCachePreferences": session.library_cache_prefs,
         "canUndo": session.can_undo(),
         "canRedo": session.can_redo(),
         "log": session.log.iter().rev().take(20).collect::<Vec<_>>(),

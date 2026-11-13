@@ -8,7 +8,11 @@ use materialcraft_engine::NodeLibrary;
 
 use super::LIBRARY_PREVIEW_SIZE;
 
-type Key = (String, String);
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum Key {
+    Graph(String, String),
+    Native(String),
+}
 const MAX_TEXTURES: usize = 256; // About 5 MiB of RGBA pixels, independent of library size.
 const MAX_VISIBLE_REQUESTS: usize = 64;
 
@@ -16,7 +20,7 @@ const MAX_VISIBLE_REQUESTS: usize = 64;
 #[derive(Default)]
 pub(super) struct GraphPreviews {
     #[cfg(not(target_arch = "wasm32"))]
-    pub persist: bool,
+    pub persistence: Option<super::preview_cache_settings::Settings>,
     library: Option<Arc<NodeLibrary>>,
     textures: HashMap<Key, (Option<TextureHandle>, u64)>,
     wanted: Vec<Key>,
@@ -41,7 +45,14 @@ impl Drop for Active {
 impl GraphPreviews {
     pub fn get(&mut self, _ctx: &egui::Context, library: &Arc<NodeLibrary>, package: &str, graph: &str) -> Option<egui::TextureId> {
         self.set_library(library);
-        let key = (package.to_string(), graph.to_string());
+        self.request(Key::Graph(package.to_string(), graph.to_string()))
+    }
+
+    pub fn native(&mut self, _ctx: &egui::Context, id: &str) -> Option<egui::TextureId> {
+        self.request(Key::Native(id.into()))
+    }
+
+    fn request(&mut self, key: Key) -> Option<egui::TextureId> {
         if let Some((texture, used)) = self.textures.get_mut(&key) {
             *used = self.frame;
             return texture.as_ref().map(TextureHandle::id);
@@ -50,6 +61,15 @@ impl GraphPreviews {
             self.wanted.push(key);
         }
         None
+    }
+
+    pub fn clear(&mut self) {
+        self.textures.clear();
+        self.wanted.clear();
+        if let Some(active) = &self.active {
+            active.cancel.store(true, Ordering::Relaxed);
+        }
+        // Keep the receiver until its worker exits so clearing cannot pile up render threads.
     }
 
     fn set_library(&mut self, library: &Arc<NodeLibrary>) {
@@ -80,7 +100,7 @@ impl GraphPreviews {
             if !active.cancel.load(Ordering::Relaxed) && self.library.as_ref().is_some_and(|library| Arc::ptr_eq(library, &active.library)) {
                 let texture = image.map(|rgba| {
                     let image = ColorImage::from_rgba_unmultiplied([LIBRARY_PREVIEW_SIZE as usize; 2], &rgba);
-                    ctx.load_texture(format!("library-graph-{}#{}", active.key.0, active.key.1), image, TextureOptions::LINEAR)
+                    ctx.load_texture(format!("library-preview-{:?}", active.key), image, TextureOptions::LINEAR)
                 });
                 self.remember(active.key.clone(), texture);
             }
@@ -91,6 +111,7 @@ impl GraphPreviews {
                 active.cancel.store(true, Ordering::Relaxed);
             }
         } else if !foreground_busy
+            && self.cache_ready()
             && let Some(library) = self.library.clone()
             && let Some(key) = self.wanted.iter().rev().find(|key| !self.textures.contains_key(*key)).cloned()
         {
@@ -112,14 +133,26 @@ impl GraphPreviews {
         let (sender, result) = std::sync::mpsc::sync_channel(1);
         let cancel = Arc::new(AtomicBool::new(false));
         let (thread_cancel, thread_library, thread_key, context) = (cancel.clone(), library.clone(), key.clone(), ctx.clone());
-        let persist = self.persist;
+        let persistence = self.persistence.clone();
         let spawned = std::thread::Builder::new().name("materialcraft-library-graphs".into()).spawn(move || {
             let render = || {
-                NodeLibrary::preview_cancellable(&thread_library, &thread_key.0, &thread_key.1, LIBRARY_PREVIEW_SIZE, &thread_cancel)
-                    .map(|image| image.resize(LIBRARY_PREVIEW_SIZE, LIBRARY_PREVIEW_SIZE, true).to_rgba8_display())
+                if thread_cancel.load(Ordering::Relaxed) {
+                    return None;
+                }
+                match &thread_key {
+                    Key::Native(id) => super::render_native(id),
+                    Key::Graph(package, graph) => NodeLibrary::preview_cancellable(&thread_library, package, graph, LIBRARY_PREVIEW_SIZE, &thread_cancel)
+                        .map(|image| image.resize(LIBRARY_PREVIEW_SIZE, LIBRARY_PREVIEW_SIZE, true).to_rgba8_display()),
+                }
             };
-            let disk = persist.then(super::preview_disk_cache::PreviewDiskCache::configured).flatten();
-            let fingerprint = disk.as_ref().and_then(|_| thread_library.preview_fingerprint(&thread_key.0, &thread_key.1, &thread_cancel));
+            let disk = persistence.and_then(super::preview_disk_cache::PreviewDiskCache::configured);
+            let fingerprint = disk.as_ref().filter(|disk| disk.enabled()).and_then(|_| match &thread_key {
+                Key::Native(id) => {
+                    use sha2::Digest;
+                    Some(sha2::Sha256::digest(format!("materialcraft-atomic-preview-v1:{id}")).into())
+                }
+                Key::Graph(package, graph) => thread_library.preview_fingerprint(package, graph, &thread_cancel),
+            });
             let rgba = match (disk, fingerprint) {
                 (Some(disk), Some(key)) => disk.get_or_render(key, LIBRARY_PREVIEW_SIZE, &thread_cancel, render),
                 _ => render(),
@@ -134,10 +167,30 @@ impl GraphPreviews {
         }
     }
 
+    fn cache_ready(&self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(settings) = &self.persistence {
+            return !settings.get().clear_pending;
+        }
+        true
+    }
+
     #[cfg(target_arch = "wasm32")]
-    fn start(&mut self, _ctx: &egui::Context, _library: Arc<NodeLibrary>, key: Key) {
-        // The browser has no cook worker; keep the category icon without retrying every frame.
-        self.remember(key, None);
+    fn start(&mut self, ctx: &egui::Context, _library: Arc<NodeLibrary>, key: Key) {
+        // Native previews remain available in the browser without a filesystem or cook worker.
+        let rgba = match &key {
+            Key::Native(id) => super::render_native(id),
+            Key::Graph(_, _) => None,
+        };
+        let texture = rgba.map(|rgba| {
+            ctx.load_texture(
+                format!("library-preview-{key:?}"),
+                ColorImage::from_rgba_unmultiplied([LIBRARY_PREVIEW_SIZE as usize; 2], &rgba),
+                TextureOptions::LINEAR,
+            )
+        });
+        self.remember(key, texture);
+        ctx.request_repaint();
     }
 }
 
@@ -155,7 +208,7 @@ mod tests {
         let context = egui::Context::default();
         let library = Arc::new(NodeLibrary::default());
         let mut previews = GraphPreviews::default();
-        let key = ("test".into(), "graph".into());
+        let key = Key::Graph("test".into(), "graph".into());
         let (job, _sender) = active(library.clone(), key.clone());
         let cancelled = job.cancel.clone();
         previews.active = Some(job);
@@ -175,7 +228,7 @@ mod tests {
         let context = egui::Context::default();
         let library = Arc::new(NodeLibrary::default());
         let old = Arc::downgrade(&library);
-        let (job, sender) = active(library.clone(), ("test".into(), "graph".into()));
+        let (job, sender) = active(library.clone(), Key::Graph("test".into(), "graph".into()));
         let mut previews = GraphPreviews { library: Some(library), active: Some(job), ..Default::default() };
         let new_library = Arc::new(NodeLibrary::default());
         previews.get(&context, &new_library, "new", "graph");
@@ -194,13 +247,43 @@ mod tests {
         let mut previews = GraphPreviews::default();
         let texture = context.load_texture("old", ColorImage::new([1, 1], vec![egui::Color32::WHITE]), TextureOptions::LINEAR);
         let old_id = texture.id();
-        previews.remember(("test".into(), "old".into()), Some(texture));
+        previews.remember(Key::Graph("test".into(), "old".into()), Some(texture));
         for index in 0..MAX_TEXTURES {
             previews.frame += 1;
-            previews.remember(("test".into(), index.to_string()), None);
+            previews.remember(Key::Graph("test".into(), index.to_string()), None);
         }
         assert_eq!(previews.textures.len(), MAX_TEXTURES);
         assert!(context.tex_manager().read().meta(old_id).is_none(), "eviction must drop the GPU texture handle");
+    }
+
+    #[test]
+    fn clear_discards_loaded_and_pending_tiles_and_rebuilds_only_requested_tiles() {
+        let context = egui::Context::default();
+        let library = Arc::new(NodeLibrary::default());
+        let mut previews = GraphPreviews::default();
+        previews.set_library(&library);
+        let key = Key::Native("blur".into());
+        let texture = context.load_texture("old", ColorImage::new([1, 1], vec![egui::Color32::WHITE]), TextureOptions::LINEAR);
+        let old_id = texture.id();
+        previews.remember(key.clone(), Some(texture));
+        let (job, sender) = active(library.clone(), key);
+        let cancelled = job.cancel.clone();
+        previews.active = Some(job);
+        previews.native(&context, "levels");
+        previews.clear();
+        assert!(previews.textures.is_empty());
+        assert!(previews.wanted.is_empty());
+        assert!(context.tex_manager().read().meta(old_id).is_none());
+        assert!(cancelled.load(Ordering::Relaxed));
+        sender.send(Some(vec![255; (LIBRARY_PREVIEW_SIZE * LIBRARY_PREVIEW_SIZE * 4) as usize])).unwrap();
+        previews.collect(&context, &library, false);
+        assert!(previews.active.is_none());
+        assert!(previews.textures.is_empty(), "the old worker result must be discarded");
+        previews.native(&context, "levels");
+        previews.collect(&context, &library, false);
+        #[cfg(not(target_arch = "wasm32"))]
+        assert_eq!(previews.active.as_ref().unwrap().key, Key::Native("levels".into()));
+        assert!(previews.wanted.is_empty(), "clearing must not schedule the entire native catalog");
     }
 
     #[test]
@@ -211,7 +294,7 @@ mod tests {
         previews.get(&context, &library, "test", "graph");
         previews.collect(&context, &library, true);
         assert!(previews.active.is_none());
-        let (job, _sender) = active(library.clone(), ("test".into(), "graph".into()));
+        let (job, _sender) = active(library.clone(), Key::Graph("test".into(), "graph".into()));
         let cancelled = job.cancel.clone();
         previews.active = Some(job);
         drop(previews);

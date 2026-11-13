@@ -77,7 +77,7 @@ impl MaterialCraftApp {
         #[cfg(not(target_arch = "wasm32"))]
         {
             app.dialogs = crate::native_dialogs::attached(&cc.egui_ctx);
-            app.thumbs.enable_persistence();
+            app.thumbs.enable_persistence(app.ui.prefs.library_cache);
         }
         app
     }
@@ -137,6 +137,11 @@ impl MaterialCraftApp {
 
     /// Push application preferences into the session
     pub fn apply_prefs(&mut self) {
+        self.ui.prefs.library_cache = self.ui.prefs.library_cache.sanitized();
+        if self.session.library_cache_prefs != self.ui.prefs.library_cache {
+            let _ = materialcraft_engine::execute(&mut self.session, "library.cache.configure", &serde_json::json!(self.ui.prefs.library_cache));
+        }
+        self.thumbs.configure_cache(self.ui.prefs.library_cache, self.session.library_cache_clear_epoch);
         self.ui.prefs.history = self.ui.prefs.history.sanitized();
         if self.session.history_prefs != self.ui.prefs.history {
             let _ = materialcraft_engine::execute(&mut self.session, "session.history", &serde_json::json!(self.ui.prefs.history));
@@ -223,6 +228,9 @@ impl MaterialCraftApp {
                 }
                 if id == "view.previewSize" {
                     self.ui.prefs.preview_size = self.session.preview_size.unwrap_or(0);
+                }
+                if id == "library.cache.configure" {
+                    self.ui.prefs.library_cache = self.session.library_cache_prefs;
                 }
                 if id == "session.history" {
                     self.ui.prefs.history = self.session.history_prefs;

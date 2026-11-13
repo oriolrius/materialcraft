@@ -131,7 +131,7 @@ as missing until a package in the folder provides it. Installed and browser buil
 packages and shared resources, compressed at build time. Library packages share a flat dependency
 registry; only sources reachable from open packages refresh their instance interfaces on edits.
 
-Library thumbnails cook one visible graph at a time, with 32 MiB of output caching and 16 MiB
+Library thumbnails cook one visible native node or graph at a time, with 32 MiB of output caching and 16 MiB
 of decoded-image caching. Only output dependencies are evaluated. Editing takes priority, and
 leaving a tile or reloading the library cancels its cook between nodes. The next job waits for
 that worker to finish; hidden tiles cannot accumulate queued work or workers. At most 256
@@ -141,17 +141,28 @@ Native Library previews also persist as PNGs in the platform cache folder select
 the existing `craft_update::Paths::per_user("materialcraft").cache`, under `previews/`: `%LOCALAPPDATA%` on
 Windows, `$XDG_CACHE_HOME` or `~/.cache` on Linux/BSD, and `~/Library/Caches` on macOS.
 This follows the [Craft storage policy](https://github.com/storytold/craft-libs/blob/main/docs/settings-storage.md).
-The cache covers native nodes and SBS graphs, retains at most 64 MiB / 4096 PNGs across builds,
-and evicts older files when admitting new previews (access times refresh at most hourly). It stores disposable
-thumbnails, independent of projects, autosaves and temporary render storage.
+The cache covers native nodes and SBS graphs. Edit → Preferences → Library preview cache stores
+the disk limit (default 64 MiB, 0 disables persistence) and maximum stored previews (default 4096).
+The supported ranges are 0–65536 MiB and 1–65536 previews. Settings apply immediately to running
+workers, with background eviction when lowering either limit, including when all previews are warm.
+Older files are evicted first (access times refresh at most hourly). These disposable thumbnails are
+independent of projects, autosaves and temporary render storage.
 
-Preview workers do all reads, encoding, atomic writes (`craft-atomic`) and eviction; none run
+**Clear cache** removes stored previews and loaded library textures, cancels the active preview,
+and discards its result. Previews rebuild passively, one visible tile at a time; hidden native
+nodes and graphs do not cook. A job from before Clear cannot write its old result back. One
+maintenance worker handles trimming and clearing without blocking the UI. Cleanup failures
+report an error and bypass disk persistence for the session so stale previews cannot reappear.
+The same actions are available through `library.cache.configure` and `library.cache.clear`;
+`session.inspect` exposes `libraryCachePreferences`. These commands never edit package contents.
+
+Background workers do all reads, encoding, atomic writes (`craft-atomic`) and eviction; none run
 on the UI thread. Keys include the preview size, an executable content digest (including local
 rebuilds with an unchanged release version), and, for SBS graphs, the source packages and all
 resource bytes in their dependency closure. Changes become visible after `library.reload` or
 the next launch, just like the in-memory library. Corrupt, oversized or unavailable cache files
 are misses; failed or cancelled renders are never persisted. Concurrent writers use a
-nonblocking file lock to share the disk budget. The browser retains its existing behavior.
+nonblocking file lock to share the disk budget. The browser keeps previews in memory only.
 
 `MATERIALCRAFT_CACHE_DIR` overrides the app cache folder (`previews/` is appended); an empty
 value disables persistence. Scripted `MATERIALCRAFT_NO_PREFS` runs leave the user's cache

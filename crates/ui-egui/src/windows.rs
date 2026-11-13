@@ -76,7 +76,9 @@ thread_local! {
 }
 
 pub fn show(app: &mut MaterialCraftApp, ctx: &egui::Context) {
-    app.thumbs.tick(ctx, &app.session.library, app.cooker.busy() || app.session.dirty);
+    if let Some(error) = app.thumbs.tick(ctx, &app.session.library, app.cooker.busy() || app.session.dirty) {
+        app.toast(error, true);
+    }
     if app.ui.windows.new_graph {
         new_graph(app, ctx);
     }
@@ -174,7 +176,8 @@ fn new_graph(app: &mut MaterialCraftApp, ctx: &egui::Context) {
 
 fn preferences(app: &mut MaterialCraftApp, ctx: &egui::Context) {
     let mut open = true;
-    modal(ctx, "prefs", tr("Preferences"), &mut open, vec2(380.0, 340.0), |ui| {
+    let mut clear_cache = false;
+    modal(ctx, "prefs", tr("Preferences"), &mut open, vec2(400.0, 500.0), |ui| {
         let p = &mut app.ui.prefs;
         let current_lang = crate::i18n::current();
         crate::widgets::combo(ui, tr("Language"), current_lang.name, |ui| {
@@ -208,9 +211,30 @@ fn preferences(app: &mut MaterialCraftApp, ctx: &egui::Context) {
             crate::preview_resolution::choices(ui, &mut p.preview_size);
         });
         ui.checkbox(&mut p.thumbnails, tr("Show node thumbnails"));
+        ui.separator();
+        ui.label(tr("Library preview cache"));
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            use materialcraft_engine::LibraryCachePrefs;
+            ui.horizontal(|ui| {
+                let label = ui.label(tr("Disk limit (MiB, 0 = off)"));
+                ui.add(egui::DragValue::new(&mut p.library_cache.disk_mib).range(0..=LibraryCachePrefs::MAX_DISK_MIB)).labelled_by(label.id);
+            });
+            ui.horizontal(|ui| {
+                let label = ui.label(tr("Maximum stored previews"));
+                ui.add(egui::DragValue::new(&mut p.library_cache.max_previews).range(1..=LibraryCachePrefs::MAX_PREVIEWS)).labelled_by(label.id);
+            });
+        }
+        clear_cache = ui.button(tr("Clear cache")).clicked();
+        ui.label(tr("Previews rebuild as they come into view."));
+        ui.separator();
         crate::widgets::slider(ui, tr("3D pan limit (mesh radii)"), &mut p.camera.pan_limit, 0.0..=20.0, 1);
         crate::widgets::slider(ui, tr("3D pan speed"), &mut p.camera.pan_speed, 0.1..=4.0, 2);
     });
+    if clear_cache {
+        app.run("library.cache.clear", serde_json::json!({}));
+        app.apply_prefs();
+    }
     if !open {
         app.ui.windows.preferences = false;
     }

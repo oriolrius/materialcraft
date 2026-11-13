@@ -413,7 +413,7 @@ fn items(app: &mut MaterialCraftApp, ui: &mut Ui, entries: &[LibraryEntry], targ
 fn preview(app: &mut MaterialCraftApp, ui: &Ui, ctx: &egui::Context, entry: &LibraryEntry, rect: Rect, fade: f32) {
     let painter = ui.painter();
     let (texture, color) = match &entry.item {
-        LibraryItem::Node { def } if entry.missing.is_none() && def != "dot" => (app.thumbs.library(ctx, def), header_color(def)),
+        LibraryItem::Node { def } if entry.missing.is_none() && def != "dot" && ui.is_rect_visible(rect) => (app.thumbs.library(ctx, def), header_color(def)),
         // Only tiles on screen ask for their graph to be cooked
         LibraryItem::Instance { package, graph } if entry.missing.is_none() && ui.is_rect_visible(rect) => {
             (app.thumbs.graph(ctx, &app.session.library, package, graph), category_color(&entry.category))

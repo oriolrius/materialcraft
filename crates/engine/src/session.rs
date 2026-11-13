@@ -142,6 +142,9 @@ pub struct Session {
     /// 3D view camera preferences (set with [`Session::set_camera_prefs`]).
     pub camera: CameraPrefs,
     pub history_prefs: crate::HistoryPrefs,
+    pub library_cache_prefs: crate::LibraryCachePrefs,
+    /// Requests handled by the UI without editing packages or their undo histories.
+    pub library_cache_clear_epoch: u64,
     pub modified: bool,
     pub log: Vec<String>,
     /// What the last opened SBS package held that MaterialCraft couldn't read; empty after a clean open.
@@ -203,6 +206,8 @@ impl Session {
             preview_size: Some(512),
             camera: CameraPrefs::default(),
             history_prefs: crate::HistoryPrefs::default(),
+            library_cache_prefs: crate::LibraryCachePrefs::default(),
+            library_cache_clear_epoch: 0,
             modified: false,
             log: Vec::new(),
             load_warnings: Vec::new(),

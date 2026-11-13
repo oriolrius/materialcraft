@@ -1584,3 +1584,22 @@ fn explorer_inputs_and_graph_drop_share_labels_and_material_assignment() {
     assert!(frame.chunks_exact(4).filter(|pixel| u16::from(pixel[0]) > u16::from(pixel[1]) + 30).count() > 100);
     save(&mut harness, &directory, "graph-dropped-on-material");
 }
+
+#[test]
+#[ignore = "requires an offscreen GPU"]
+fn library_cache_preferences() {
+    let app = MaterialCraftApp::headless(materialcraft_engine::sample_session(), UiState::default());
+    let mut h = harness(app, 1100.0, 850.0);
+    settle(&mut h, 4);
+    h.state_mut().ui.windows.preferences = true;
+    settle(&mut h, 4);
+    assert!(h.query_all(By::new().label("Disk limit (MiB, 0 = off)")).next().is_some());
+    assert!(h.query_all(By::new().label("Maximum stored previews")).next().is_some());
+    h.get_by_label("Clear cache").click();
+    settle(&mut h, 4);
+    assert_eq!(h.state().session.library_cache_clear_epoch, 1);
+    if let Some(dir) = std::env::var_os("MC_SNAPSHOT_DIR").map(std::path::PathBuf::from) {
+        std::fs::create_dir_all(&dir).unwrap();
+        save(&mut h, &dir, "library-cache-preferences");
+    }
+}

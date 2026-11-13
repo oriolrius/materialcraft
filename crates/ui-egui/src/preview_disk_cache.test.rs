@@ -6,7 +6,7 @@ const SIDE: u32 = 8;
 static TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn cache(root: &Path) -> PreviewDiskCache {
-    PreviewDiskCache { root: root.to_owned(), renderer: [1; 32], budget: 64 * 1024 * 1024, entries: MAX_ENTRIES }
+    PreviewDiskCache { root: root.to_owned(), renderer: [1; 32], settings: Settings::new(Default::default()), epoch: 0 }
 }
 
 fn pixels() -> Vec<u8> {
@@ -48,7 +48,7 @@ fn real_library_previews_survive_relaunch() {
     if let Some(root) = std::env::var_os(CHILD) {
         let library = materialcraft_engine::NodeLibrary::shared();
         let phase = std::env::var("MATERIALCRAFT_TEST_DISK_PHASE").unwrap();
-        let cache = PreviewDiskCache::open(PathBuf::from(root), 64 * 1024 * 1024).unwrap();
+        let cache = PreviewDiskCache::open(PathBuf::from(root), Settings::new(Default::default())).unwrap();
         let cancel = AtomicBool::new(false);
         for (package, graph) in
             [("sbs://blur_hq.sbs", "blur_hq"), ("sbs://noise_clouds_3_v2.sbs", "clouds_3"), ("sbs://materials/pbr/bricks_001.sbs", "bricks_001")]
@@ -132,11 +132,11 @@ fn corrupt_oversized_and_wrong_size_files_are_misses_and_repaired() {
 fn cache_budget_evicts_old_files_and_preserves_unrelated_files() {
     let _serial = TESTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let root = tempfile::tempdir().unwrap();
-    let mut cache = cache(root.path());
+    let cache = cache(root.path());
     let old = cache.path([1; 32], SIDE);
     cache.write(&old, SIDE, &pixels()).unwrap();
     let file_bytes = fs::metadata(&old).unwrap().len();
-    cache.budget = file_bytes * 2;
+    cache.settings.update(Limits { budget: file_bytes * 2, entries: 4096 }, false);
     File::options().write(true).open(&old).unwrap().set_modified(SystemTime::UNIX_EPOCH).unwrap();
     fs::write(root.path().join("my-image.png"), b"unrelated").unwrap();
     let leftover = root.path().join(craft_atomic::temp_name(old.file_name().unwrap().to_str().unwrap()));
@@ -150,13 +150,12 @@ fn cache_budget_evicts_old_files_and_preserves_unrelated_files() {
     assert_eq!(fs::read(root.path().join("my-image.png")).unwrap(), b"unrelated");
     let total: u64 =
         fs::read_dir(root.path()).unwrap().flatten().filter(|f| cache_name(&f.file_name().to_string_lossy())).map(|f| f.metadata().unwrap().len()).sum();
-    assert!(total <= cache.budget);
-    cache.budget = 64 * 1024 * 1024;
-    cache.entries = 1;
+    assert!(total <= cache.settings.get().limits.budget);
+    cache.settings.update(Limits { budget: 64 * 1024 * 1024, entries: 1 }, false);
     cache.write(&cache.path([4; 32], SIDE), SIDE, &pixels()).unwrap();
     let count = fs::read_dir(root.path()).unwrap().flatten().filter(|file| cache_name(&file.file_name().to_string_lossy())).count();
     assert_eq!(count, 1, "the entry limit also applies when there is space left");
-    cache.budget = file_bytes - 1;
+    cache.settings.update(Limits { budget: file_bytes - 1, entries: 1 }, false);
     let oversized = cache.path([5; 32], SIDE);
     cache.write(&oversized, SIDE, &pixels()).unwrap();
     assert!(!oversized.exists());
@@ -189,4 +188,64 @@ fn cache_does_not_read_or_evict_symlink_targets() {
     assert!(cache.read(&path, SIDE).is_none());
     let _ = cache.write(&path, SIDE, &pixels());
     assert_eq!(fs::read(outside.path()).unwrap(), b"keep");
+}
+
+#[test]
+fn changed_limits_trim_a_warm_cache_without_another_render() {
+    let _serial = TESTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let root = tempfile::tempdir().unwrap();
+    let cache = cache(root.path());
+    for key in 1..=3 {
+        cache.write(&cache.path([key; 32], SIDE), SIDE, &pixels()).unwrap();
+    }
+    let count = || fs::read_dir(root.path()).unwrap().flatten().filter(|f| cache_name(&f.file_name().to_string_lossy())).count();
+    cache.settings.update(Limits { budget: 64 * 1024 * 1024, entries: 2 }, false);
+    assert!(cache.maintain(cache.settings.get()).unwrap());
+    assert_eq!(count(), 2);
+    let file_bytes = fs::read_dir(root.path()).unwrap().flatten().find(|f| cache_name(&f.file_name().to_string_lossy())).unwrap().metadata().unwrap().len();
+    cache.settings.update(Limits { budget: file_bytes, entries: 4096 }, false);
+    assert!(cache.maintain(cache.settings.get()).unwrap());
+    assert_eq!(count(), 1);
+    cache.settings.update(Limits { budget: 0, entries: 4096 }, false);
+    assert!(cache.maintain(cache.settings.get()).unwrap());
+    assert_eq!(count(), 0);
+    assert_eq!(cache.get_or_render([9; 32], SIDE, &AtomicBool::new(false), || Some(pixels())), Some(pixels()));
+    assert_eq!(count(), 0, "disabled persistence must still render without writing");
+}
+
+#[test]
+fn clear_removes_previews_and_prevents_old_workers_from_repopulating_them() {
+    let _serial = TESTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let root = tempfile::tempdir().unwrap();
+    let cache = cache(root.path());
+    let path = cache.path([1; 32], SIDE);
+    cache.write(&path, SIDE, &pixels()).unwrap();
+    fs::write(root.path().join("keep.txt"), b"keep").unwrap();
+    cache.settings.update(cache.settings.get().limits, true);
+    let state = cache.settings.get();
+    assert!(cache.read(&path, SIDE).is_none(), "pending clear must bypass stale files");
+    assert!(cache.maintain(state).unwrap());
+    cache.settings.finish(state.epoch, false);
+    assert!(!path.exists());
+    assert_eq!(fs::read(root.path().join("keep.txt")).unwrap(), b"keep");
+    cache.write(&path, SIDE, &pixels()).unwrap();
+    assert!(!path.exists(), "a worker started before Clear cannot refill the cache");
+    let fresh = PreviewDiskCache { epoch: state.epoch, ..cache };
+    fresh.write(&path, SIDE, &pixels()).unwrap();
+    assert!(path.exists(), "newly visible previews may persist again");
+}
+
+#[test]
+fn running_preview_observes_limits_changed_during_its_render() {
+    let _serial = TESTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let root = tempfile::tempdir().unwrap();
+    let cache = cache(root.path());
+    assert_eq!(
+        cache.get_or_render([1; 32], SIDE, &AtomicBool::new(false), || {
+            cache.settings.update(Limits { budget: 0, entries: 4096 }, false);
+            Some(pixels())
+        }),
+        Some(pixels())
+    );
+    assert!(!cache.path([1; 32], SIDE).exists());
 }

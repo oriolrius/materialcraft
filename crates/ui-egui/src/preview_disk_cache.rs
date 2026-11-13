@@ -10,19 +10,21 @@ use std::time::{Duration, SystemTime};
 use image::{ImageDecoder, ImageEncoder};
 use sha2::{Digest, Sha256};
 
-const MAX_ENTRIES: usize = 4096;
+use super::preview_cache_settings::{Limits, Settings, State};
+
+const MAX_SCAN_ENTRIES: usize = materialcraft_engine::LibraryCachePrefs::MAX_PREVIEWS as usize * 2;
 const MAX_FILE_BYTES: u64 = 128 * 1024;
 const MAX_SIDE: u32 = 128;
 
 pub(super) struct PreviewDiskCache {
     root: PathBuf,
     renderer: [u8; 32],
-    budget: u64,
-    entries: usize,
+    settings: Settings,
+    epoch: u64,
 }
 
 impl PreviewDiskCache {
-    pub fn configured() -> Option<Self> {
+    pub fn configured(settings: Settings) -> Option<Self> {
         // Scripted runs must not touch the user's cache. An explicit override lets tests and
         // agents exercise persistence in an isolated folder; an empty override disables it.
         let root = match std::env::var_os("MATERIALCRAFT_CACHE_DIR") {
@@ -33,12 +35,12 @@ impl PreviewDiskCache {
             // including redirected Windows profiles and absolute XDG paths.
             None => craft_update::Paths::per_user("materialcraft").ok()?.cache,
         };
-        Self::open(root.join("previews"), 64 * 1024 * 1024)
+        Self::open(root.join("previews"), settings)
     }
 
     /// Called on a worker. The executable digest also invalidates development builds that keep
     /// the same version number. It is streamed once per process, never on the event-loop thread.
-    pub fn open(root: PathBuf, budget: u64) -> Option<Self> {
+    pub fn open(root: PathBuf, settings: Settings) -> Option<Self> {
         static RENDERER: OnceLock<Option<[u8; 32]>> = OnceLock::new();
         let renderer = *RENDERER.get_or_init(|| {
             let mut file = File::open(std::env::current_exe().ok()?).ok()?.take((1 << 30) + 1);
@@ -46,7 +48,8 @@ impl PreviewDiskCache {
             let bytes = io::copy(&mut file, &mut hash).ok()?;
             (bytes <= 1 << 30).then(|| hash.finalize().into())
         });
-        Some(Self { root, renderer: renderer?, budget, entries: MAX_ENTRIES })
+        let epoch = settings.get().epoch;
+        Some(Self { root, renderer: renderer?, settings, epoch })
     }
 
     pub fn get_or_render(&self, key: [u8; 32], side: u32, cancel: &AtomicBool, render: impl FnOnce() -> Option<Vec<u8>>) -> Option<Vec<u8>> {
@@ -78,7 +81,7 @@ impl PreviewDiskCache {
     }
 
     fn read(&self, path: &Path, side: u32) -> Option<Vec<u8>> {
-        if side == 0 || side > MAX_SIDE || self.budget == 0 {
+        if side == 0 || side > MAX_SIDE || self.limits().is_none_or(|limits| limits.budget == 0) {
             return None;
         }
         let metadata = fs::symlink_metadata(path).ok()?;
@@ -109,12 +112,12 @@ impl PreviewDiskCache {
     }
 
     fn write(&self, path: &Path, side: u32, pixels: &[u8]) -> io::Result<()> {
-        if side == 0 || side > MAX_SIDE || pixels.len() != (side * side * 4) as usize || self.budget == 0 {
+        if side == 0 || side > MAX_SIDE || pixels.len() != (side * side * 4) as usize || self.limits().is_none_or(|limits| limits.budget == 0) {
             return Ok(());
         }
         let mut bytes = Vec::new();
         image::codecs::png::PngEncoder::new(&mut bytes).write_image(pixels, side, side, image::ExtendedColorType::Rgba8).map_err(io::Error::other)?;
-        if bytes.len() as u64 > MAX_FILE_BYTES || bytes.len() as u64 > self.budget {
+        if bytes.len() as u64 > MAX_FILE_BYTES {
             return Ok(());
         }
         fs::create_dir_all(&self.root)?;
@@ -127,16 +130,45 @@ impl PreviewDiskCache {
         if fs::symlink_metadata(path).is_ok_and(|metadata| !metadata.is_file()) {
             return Err(io::Error::other("preview cache entry is not a regular file"));
         }
-        self.reserve(path, bytes.len() as u64)?;
+        let Some(limits) = self.limits() else { return Ok(()) };
+        if bytes.len() as u64 > limits.budget {
+            return Ok(());
+        }
+        self.reserve(Some(path), bytes.len() as u64, limits)?;
         craft_atomic::WriteOptions::default().with_new_file_permissions(craft_atomic::NewFilePermissions::Private).atomic_write(path, &bytes)
     }
 
-    fn reserve(&self, target: &Path, incoming: u64) -> io::Result<()> {
+    pub fn enabled(&self) -> bool {
+        self.limits().is_some_and(|limits| limits.budget > 0)
+    }
+
+    fn limits(&self) -> Option<Limits> {
+        let state = self.settings.get();
+        (!state.disabled && !state.clear_pending && state.epoch == self.epoch).then_some(state.limits)
+    }
+
+    /// Returns false only while another process is writing; the coordinator retries later.
+    pub fn maintain(&self, state: State) -> io::Result<bool> {
+        if !self.root.try_exists()? {
+            return Ok(true);
+        }
+        let lock = File::options().read(true).write(true).create(true).truncate(false).open(self.root.join("cache.lock"))?;
+        match lock.try_lock() {
+            Ok(()) => {}
+            Err(std::fs::TryLockError::WouldBlock) => return Ok(false),
+            Err(std::fs::TryLockError::Error(error)) => return Err(error),
+        }
+        let limits = if state.clear_pending || state.limits.budget == 0 { Limits { budget: 0, entries: 0 } } else { state.limits };
+        self.reserve(None, 0, limits)?;
+        Ok(true)
+    }
+
+    fn reserve(&self, target: Option<&Path>, incoming: u64, limits: Limits) -> io::Result<()> {
         let mut entries = Vec::new();
         let mut total = 0u64;
         // Bound both scan time and metadata allocations in an externally populated directory.
         for (index, entry) in fs::read_dir(&self.root)?.enumerate() {
-            if index >= MAX_ENTRIES * 2 {
+            if index >= MAX_SCAN_ENTRIES {
                 return Err(io::Error::other("preview cache directory exceeds its entry limit"));
             }
             let entry = entry?;
@@ -151,7 +183,7 @@ impl PreviewDiskCache {
                 fs::remove_file(entry.path())?;
                 continue;
             }
-            if !cache_name(&name) || entry.path() == target {
+            if !cache_name(&name) || target.is_some_and(|target| entry.path() == target) {
                 continue;
             }
             let metadata = entry.metadata()?;
@@ -161,7 +193,7 @@ impl PreviewDiskCache {
         entries.sort_unstable_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
         let mut count = entries.len();
         for (_, path, size) in entries {
-            if total.saturating_add(incoming) <= self.budget && count < self.entries {
+            if total.saturating_add(incoming) <= limits.budget && count.saturating_add(usize::from(target.is_some())) <= limits.entries {
                 break;
             }
             fs::remove_file(path)?;
