@@ -137,6 +137,26 @@ leaving a tile or reloading the library cancels its cook between nodes. The next
 that worker to finish; hidden tiles cannot accumulate queued work or workers. At most 256
 finished previews retain GPU textures (about 5 MiB of pixels).
 
+Native Library previews also persist as PNGs in the platform cache folder selected by
+the existing `craft_update::Paths::per_user("materialcraft").cache`, under `previews/`: `%LOCALAPPDATA%` on
+Windows, `$XDG_CACHE_HOME` or `~/.cache` on Linux/BSD, and `~/Library/Caches` on macOS.
+This follows the [Craft storage policy](https://github.com/storytold/craft-libs/blob/main/docs/settings-storage.md).
+The cache covers native nodes and SBS graphs, retains at most 64 MiB / 4096 PNGs across builds,
+and evicts older files when admitting new previews (access times refresh at most hourly). It stores disposable
+thumbnails, independent of projects, autosaves and temporary render storage.
+
+Preview workers do all reads, encoding, atomic writes (`craft-atomic`) and eviction; none run
+on the UI thread. Keys include the preview size, an executable content digest (including local
+rebuilds with an unchanged release version), and, for SBS graphs, the source packages and all
+resource bytes in their dependency closure. Changes become visible after `library.reload` or
+the next launch, just like the in-memory library. Corrupt, oversized or unavailable cache files
+are misses; failed or cancelled renders are never persisted. Concurrent writers use a
+nonblocking file lock to share the disk budget. The browser retains its existing behavior.
+
+`MATERIALCRAFT_CACHE_DIR` overrides the app cache folder (`previews/` is appended); an empty
+value disables persistence. Scripted `MATERIALCRAFT_NO_PREFS` runs leave the user's cache
+untouched unless that explicit override is provided. Headless UI harnesses keep persistence off.
+
 The local `sbs_library_build` example converts native XML without a model round trip, checking that
 computational fields survive presentation edits and reference rewriting. It generates independent
 resource substitutes without reading source resource files. It retains supplied graph implementations;

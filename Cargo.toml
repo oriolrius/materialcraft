@@ -59,6 +59,7 @@ materialcraft-ui-egui = { path = "crates/ui-egui" }
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10" # MIT OR Apache-2.0; stable content keys for persistent previews.
 glam = { version = "0.30", features = ["serde", "bytemuck"] }
 bytemuck = { version = "1", features = ["derive"] }
 rayon = "1"
@@ -98,6 +99,8 @@ craft-menu = { git = "https://github.com/storytold/craft-libs", rev = "1b34eba41
 craft-window = { git = "https://github.com/storytold/craft-libs", rev = "1b34eba41e62138fc2438d2734523b302840b45d", features = ["egui"] }
 # Release checks and self-updates for the desktop app: storytold/craft-libs, MIT OR Apache-2.0.
 craft-update = { git = "https://github.com/storytold/craft-libs", rev = "1b34eba41e62138fc2438d2734523b302840b45d", features = ["egui"] }
+# Atomic persistence, at the suite's existing revision.
+craft-atomic = { git = "https://github.com/storytold/craft-libs", rev = "1b34eba41e62138fc2438d2734523b302840b45d" }
 
 # egui 0.37 and winit: the suite's forks (storytold/egui, storytold/winit), as craft-libs pins them.
 [patch.crates-io]

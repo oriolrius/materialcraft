@@ -24,6 +24,8 @@ image = { workspace = true }
 zip = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+craft-atomic = { workspace = true }
+sha2 = { workspace = true }
 sys-locale = "0.3"
 craft-update = { workspace = true }
 craft-dialogs = { workspace = true }
@@ -42,6 +44,7 @@ web-sys = { version = "0.3", features = ["Window", "Document", "HtmlElement", "H
 
 # winit needs a window system on Linux, so the crate's own tests build with X11.
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tempfile = "3"
 eframe = { workspace = true, features = ["x11"] }
 # Offscreen renders of the real UI (tests/snapshot.rs).
 egui_kittest = { workspace = true, features = ["wgpu", "snapshot", "eframe"] }

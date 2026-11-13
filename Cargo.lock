@@ -808,6 +808,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-atomic"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=1b34eba41e62138fc2438d2734523b302840b45d#1b34eba41e62138fc2438d2734523b302840b45d"
+dependencies = [
+ "rustix 1.1.6",
+]
+
+[[package]]
 name = "craft-dialogs"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=1b34eba41e62138fc2438d2734523b302840b45d#1b34eba41e62138fc2438d2734523b302840b45d"
@@ -2671,6 +2679,7 @@ dependencies = [
  "materialcraft-nodes",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 2.0.21",
 ]
 
@@ -2751,6 +2760,7 @@ name = "materialcraft-ui-egui"
 version = "0.1.3"
 dependencies = [
  "base64 0.22.1",
+ "craft-atomic",
  "craft-dialogs",
  "craft-keymap",
  "craft-quit",
@@ -2769,7 +2779,9 @@ dependencies = [
  "rfd",
  "serde",
  "serde_json",
+ "sha2",
  "sys-locale",
+ "tempfile",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

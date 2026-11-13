@@ -19,6 +19,7 @@ pub struct Thumbs {
     library: HashMap<String, TextureHandle>,
     library_rx: Option<Receiver<Previews>>,
     library_started: bool,
+    persist_library: bool,
     graphs: GraphPreviews,
     frame: u64,
 }
@@ -32,8 +33,18 @@ pub fn color_image(img: &Image, side: u32) -> ColorImage {
 #[path = "graph_previews.rs"]
 mod graph_previews;
 use graph_previews::GraphPreviews;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "preview_disk_cache.rs"]
+mod preview_disk_cache;
 
 impl Thumbs {
+    /// Opt in only for a native app window; offscreen harnesses never use the user's cache.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn enable_persistence(&mut self) {
+        self.persist_library = true;
+        self.graphs.persist = true;
+    }
+
     pub fn clear_nodes(&mut self) {
         self.nodes.clear();
     }
@@ -86,7 +97,7 @@ impl Thumbs {
     pub fn library(&mut self, ctx: &egui::Context, def: &str) -> Option<egui::TextureId> {
         if !self.library_started {
             self.library_started = true;
-            self.library_rx = Some(spawn_library_previews(ctx.clone()));
+            self.library_rx = Some(spawn_library_previews(ctx.clone(), self.persist_library));
         }
         self.library.get(def).map(TextureHandle::id)
     }
@@ -102,68 +113,87 @@ fn sample_inputs() -> (Image, Image, Image) {
     (gray, color, normal)
 }
 
-fn previews() -> Previews {
+fn previews(_persist: bool) -> Previews {
     let (gray, color, normal) = sample_inputs();
     let no_res = |_: &str| None;
     let vars = BTreeMap::new();
     let mut out = Vec::new();
+    #[cfg(not(target_arch = "wasm32"))]
+    let disk = _persist.then(preview_disk_cache::PreviewDiskCache::configured).flatten();
     for def in catalog() {
         if def.id == "graph_instance" {
             continue;
         }
-        let inputs: Vec<Option<Image>> = def
-            .inputs
-            .iter()
-            .enumerate()
-            .map(|(i, p)| {
-                // Masks and secondary inputs stay empty so the main effect shows
-                if i > 0 && !matches!(def.id, "blend" | "height_blend" | "normal_blend" | "rgba_merge") {
-                    return None;
-                }
-                Some(if p.id.contains("normal") || def.category.contains("Normal") && p.kind == materialcraft_engine::nodes::PortKind::Color {
-                    normal.clone()
-                } else if p.kind == materialcraft_engine::nodes::PortKind::Color {
-                    color.clone()
-                } else if i == 1 {
-                    gray.map(Kind::Gray, |v| [1.0 - v[0], 0.0, 0.0, 0.0])
-                } else {
-                    gray.clone()
+        let render = || {
+            let inputs: Vec<Option<Image>> = def
+                .inputs
+                .iter()
+                .enumerate()
+                .map(|(i, p)| {
+                    // Masks and secondary inputs stay empty so the main effect shows
+                    if i > 0 && !matches!(def.id, "blend" | "height_blend" | "normal_blend" | "rgba_merge") {
+                        return None;
+                    }
+                    Some(if p.id.contains("normal") || def.category.contains("Normal") && p.kind == materialcraft_engine::nodes::PortKind::Color {
+                        normal.clone()
+                    } else if p.kind == materialcraft_engine::nodes::PortKind::Color {
+                        color.clone()
+                    } else if i == 1 {
+                        gray.map(Kind::Gray, |v| [1.0 - v[0], 0.0, 0.0, 0.0])
+                    } else {
+                        gray.clone()
+                    })
                 })
-            })
-            .collect();
-        let params = resolve_params(def, &BTreeMap::new());
-        let ctx = CookContext {
-            w: LIBRARY_PREVIEW_SIZE,
-            h: LIBRARY_PREVIEW_SIZE,
-            seed: 3,
-            tile: true,
-            inputs: &inputs,
-            params: &params,
-            resource: &no_res,
-            vars: &vars,
+                .collect();
+            let params = resolve_params(def, &BTreeMap::new());
+            let ctx = CookContext {
+                w: LIBRARY_PREVIEW_SIZE,
+                h: LIBRARY_PREVIEW_SIZE,
+                seed: 3,
+                tile: true,
+                inputs: &inputs,
+                params: &params,
+                resource: &no_res,
+                vars: &vars,
+            };
+            let imgs = (def.cook)(&ctx).ok()?;
+            Some(imgs.first()?.resize(LIBRARY_PREVIEW_SIZE, LIBRARY_PREVIEW_SIZE, true).to_rgba8_display())
         };
-        if let Ok(imgs) = (def.cook)(&ctx)
-            && let Some(img) = imgs.first()
-        {
-            out.push((def.id.to_string(), img.resize(LIBRARY_PREVIEW_SIZE, LIBRARY_PREVIEW_SIZE, true).to_rgba8_display()));
+        #[cfg(not(target_arch = "wasm32"))]
+        let rgba = {
+            use sha2::Digest;
+            match &disk {
+                Some(disk) => disk.get_or_render(
+                    sha2::Sha256::digest(format!("materialcraft-atomic-preview-v1:{}", def.id)).into(),
+                    LIBRARY_PREVIEW_SIZE,
+                    &std::sync::atomic::AtomicBool::new(false),
+                    render,
+                ),
+                None => render(),
+            }
+        };
+        #[cfg(target_arch = "wasm32")]
+        let rgba = render();
+        if let Some(rgba) = rgba {
+            out.push((def.id.to_string(), rgba));
         }
     }
     out
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn spawn_library_previews(ctx: egui::Context) -> Receiver<Previews> {
+fn spawn_library_previews(ctx: egui::Context, persist: bool) -> Receiver<Previews> {
     let (tx, rx) = std::sync::mpsc::channel();
     let _ = std::thread::Builder::new().name("materialcraft-library".into()).spawn(move || {
-        let _ = tx.send(previews());
+        let _ = tx.send(previews(persist));
         ctx.request_repaint();
     });
     rx
 }
 
 #[cfg(target_arch = "wasm32")]
-fn spawn_library_previews(_ctx: egui::Context) -> Receiver<Previews> {
+fn spawn_library_previews(_ctx: egui::Context, persist: bool) -> Receiver<Previews> {
     let (tx, rx) = std::sync::mpsc::channel();
-    let _ = tx.send(previews());
+    let _ = tx.send(previews(persist));
     rx
 }

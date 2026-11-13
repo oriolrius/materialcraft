@@ -77,6 +77,7 @@ impl MaterialCraftApp {
         #[cfg(not(target_arch = "wasm32"))]
         {
             app.dialogs = crate::native_dialogs::attached(&cc.egui_ctx);
+            app.thumbs.enable_persistence();
         }
         app
     }

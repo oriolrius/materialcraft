@@ -15,6 +15,8 @@ const MAX_VISIBLE_REQUESTS: usize = 64;
 /// Only one cook may run; every frame replaces the pending work with its visible tiles.
 #[derive(Default)]
 pub(super) struct GraphPreviews {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub persist: bool,
     library: Option<Arc<NodeLibrary>>,
     textures: HashMap<Key, (Option<TextureHandle>, u64)>,
     wanted: Vec<Key>,
@@ -110,9 +112,18 @@ impl GraphPreviews {
         let (sender, result) = std::sync::mpsc::sync_channel(1);
         let cancel = Arc::new(AtomicBool::new(false));
         let (thread_cancel, thread_library, thread_key, context) = (cancel.clone(), library.clone(), key.clone(), ctx.clone());
+        let persist = self.persist;
         let spawned = std::thread::Builder::new().name("materialcraft-library-graphs".into()).spawn(move || {
-            let image = NodeLibrary::preview_cancellable(&thread_library, &thread_key.0, &thread_key.1, LIBRARY_PREVIEW_SIZE, &thread_cancel);
-            let rgba = image.map(|image| image.resize(LIBRARY_PREVIEW_SIZE, LIBRARY_PREVIEW_SIZE, true).to_rgba8_display());
+            let render = || {
+                NodeLibrary::preview_cancellable(&thread_library, &thread_key.0, &thread_key.1, LIBRARY_PREVIEW_SIZE, &thread_cancel)
+                    .map(|image| image.resize(LIBRARY_PREVIEW_SIZE, LIBRARY_PREVIEW_SIZE, true).to_rgba8_display())
+            };
+            let disk = persist.then(super::preview_disk_cache::PreviewDiskCache::configured).flatten();
+            let fingerprint = disk.as_ref().and_then(|_| thread_library.preview_fingerprint(&thread_key.0, &thread_key.1, &thread_cancel));
+            let rgba = match (disk, fingerprint) {
+                (Some(disk), Some(key)) => disk.get_or_render(key, LIBRARY_PREVIEW_SIZE, &thread_cancel, render),
+                _ => render(),
+            };
             let _ = sender.send(rgba);
             context.request_repaint();
         });
