@@ -43,6 +43,7 @@ images, materials, sample graphs, presets, environments) may ever be added.
 | `assets/sbs/resources/leather.png` | Leather texture | Nick Rose | Original artwork supplied by the contributor; [artist website](https://www.artstation.com/nrose3d) | CC0-1.0 ([license](assets/sbs/resources/LICENSE_NICK_ROSE.txt)) |
 | `assets/sbs/resources/scratched_metal.png` | Scratched metal texture | Nick Rose | Original artwork supplied by the contributor; [artist website](https://www.artstation.com/nrose3d) | CC0-1.0 ([license](assets/sbs/resources/LICENSE_NICK_ROSE.txt)) |
 | `assets/sbs/resources/moss01_bmp.bmp` | Moss texture | Nick Rose | Original artwork supplied by the contributor; [artist website](https://www.artstation.com/nrose3d) | CC0-1.0 ([license](assets/sbs/resources/LICENSE_NICK_ROSE.txt)) |
+| `assets/sbs/resources/perm.png` | Horizontal Bar Noise | Nick Rose | Original artwork supplied by the contributor; [artist website](https://www.artstation.com/nrose3d) | CC0-1.0 ([license](assets/sbs/resources/LICENSE_NICK_ROSE.txt)) |
 
 ## Third-party assets compiled into the binary
 

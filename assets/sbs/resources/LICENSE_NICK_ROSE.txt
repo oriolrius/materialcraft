@@ -2,7 +2,7 @@ Original textures by Nick Rose
 Artist website: https://www.artstation.com/nrose3d
 License: CC0-1.0
 
-Applies to: scratch_damage.png, leather.png, scratched_metal.png, moss01_bmp.bmp.
+Applies to: scratch_damage.png, leather.png, scratched_metal.png, moss01_bmp.bmp, perm.png.
 Original artwork and its CC0 dedication were supplied by the contributor.
 
 Creative Commons Legal Code
