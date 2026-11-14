@@ -224,9 +224,10 @@ fn empty_and_wrong_type_functions_remain_editable_but_report_cook_errors() {
 
 #[test]
 fn instance_parameter_functions_work_without_stored_literals_and_use_instance_size() {
-    use materialcraft_engine::core::{Graph, Package, ValueType};
+    use materialcraft_engine::core::{Graph, OutputFormat, Package, ValueType};
 
     let mut source = Graph::new("Source");
+    source.format = OutputFormat::F32;
     let color = source.add_node("uniform", [0.0; 2]);
     source.node_mut(color).unwrap().params.insert("color_mode".into(), Value::Bool(false));
     source.node_mut(color).unwrap().functions.insert("color".into(), FunctionGraph::input("amount", ValueType::Float4));
@@ -252,6 +253,7 @@ fn instance_parameter_functions_work_without_stored_literals_and_use_instance_si
     source.connect(dimensions, "output", size_output, "input").unwrap();
     let mut parent = Graph::new("Parent");
     parent.size = [6, 5];
+    parent.format = OutputFormat::F32;
     let owner = parent.add_node("graph_instance", [0.0; 2]);
     parent.node_mut(owner).unwrap().params.insert("graph".into(), Value::Text("Source".into()));
     let mut package = Package::new("Instances");

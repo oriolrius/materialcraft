@@ -1,6 +1,6 @@
 use materialcraft_engine::{
     FunctionGraphTarget, Session,
-    core::{FunctionGraph, Graph, NodeId, Package, ParameterInheritance, Value},
+    core::{FunctionGraph, Graph, NodeId, OutputFormat, Package, ParameterInheritance, Value},
     execute,
     formats::sbs::{read_sbs, write_sbs},
     new_session,
@@ -114,6 +114,7 @@ fn graph_metadata_and_host_values_cook_and_round_trip_as_native_get_nodes() {
 fn pixel_ratio_and_tiling_inherit_and_preserve_native_relative_modes() {
     let mut graph = Graph::new("Inheritance");
     graph.size = [4, 4];
+    graph.format = OutputFormat::F32;
     graph.tiling = [true, true];
     let source = graph.add_node("uniform", [0.0; 2]);
     let input = graph.node_mut(source).unwrap();
@@ -139,7 +140,12 @@ fn pixel_ratio_and_tiling_inherit_and_preserve_native_relative_modes() {
         let bytes = write_sbs(&session.pkg).unwrap();
         let read = read_sbs(&bytes, "inheritance.sbs", &|_| None).unwrap();
         assert!(read.warnings.is_empty(), "{:?}", read.warnings);
-        assert_eq!(read.pkg.graphs[0].node(pixel).unwrap().base, session.pkg.graphs[0].node(pixel).unwrap().base);
+
+        // SBS represents Inherit as a format value plus a relative mode
+        let mut expected_base = session.pkg.graphs[0].node(pixel).unwrap().base.clone();
+        expected_base.format = OutputFormat::U16;
+        expected_base.format_mode = ParameterInheritance::RelativeToInput;
+        assert_eq!(read.pkg.graphs[0].node(pixel).unwrap().base, expected_base);
         let mut reopened = Session::new(read.pkg);
 
         for session in [&mut session, &mut reopened] {
@@ -147,6 +153,46 @@ fn pixel_ratio_and_tiling_inherit_and_preserve_native_relative_modes() {
             assert_eq!(cooked.nodes[&pixel].error, None);
             assert!((cooked.image(pixel, 0).unwrap().mean()[0] - expected).abs() < 1e-6, "{mode}");
         }
+    }
+}
+
+#[test]
+fn pixel_processor_default_format_preserves_input_precision_on_sbs_round_trip() {
+    for (input_format, parent_format, expected_value) in
+        [(Some(OutputFormat::U8), OutputFormat::F32, 1.0), (Some(OutputFormat::F32), OutputFormat::U8, 1.25), (None, OutputFormat::F32, 1.25)]
+    {
+        let expected_format = input_format.unwrap_or(parent_format);
+        let mut graph = Graph::new("Format inheritance");
+        graph.size = [4, 4];
+        graph.format = parent_format;
+        let input = input_format.map(|format| {
+            let input = graph.add_node("uniform", [0.0; 2]);
+            graph.node_mut(input).unwrap().base.format = format;
+            input
+        });
+        let pixel = graph.add_node("pixel_processor", [200.0, 0.0]);
+        graph.node_mut(pixel).unwrap().params.insert("function".into(), Value::Function(Box::new(FunctionGraph::constant(Value::Float(1.25)))));
+        if let Some(input) = input {
+            graph.connect(input, "output", pixel, "input0").unwrap();
+        }
+
+        let mut package = Package::new("Format inheritance");
+        package.graphs.push(graph);
+        let mut original = Session::new(package);
+        let before = original.cook();
+        assert_eq!(before.nodes[&pixel].error, None);
+        assert_eq!(before.nodes[&pixel].base.format, expected_format);
+        assert_eq!(before.image(pixel, 0).unwrap().get(0, 0, false)[0], expected_value);
+
+        let bytes = write_sbs(&original.pkg).unwrap();
+        let read = read_sbs(&bytes, "format-inheritance.sbs", &|_| None).unwrap();
+        assert!(read.warnings.is_empty(), "{:?}", read.warnings);
+        let mut reopened = Session::new(read.pkg);
+        let after = reopened.cook();
+
+        assert_eq!(after.nodes[&pixel].error, None);
+        assert_eq!(after.image(pixel, 0).unwrap().get(0, 0, false)[0], expected_value, "input {input_format:?}, parent {parent_format:?}");
+        assert_eq!(after.nodes[&pixel].base.format, expected_format);
     }
 }
 
@@ -210,6 +256,7 @@ fn nested_function_instances_use_the_processing_callers_variable_scope() {
     package.graphs.push(wrapper);
     let mut graph = Graph::new("Material");
     graph.size = [4, 4];
+    graph.format = OutputFormat::F32;
     let pixel = graph.add_node("pixel_processor", [0.0; 2]);
     let value = graph.add_node("value_processor", [200.0, 0.0]);
     for id in [pixel, value] {

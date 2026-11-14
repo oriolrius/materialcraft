@@ -62,6 +62,20 @@ fn settle(h: &mut Harness<'static, MaterialCraftApp>, frames: usize) {
     }
 }
 
+fn wait_for_3d_frame(h: &mut Harness<'static, MaterialCraftApp>, previous: Option<&[u8]>) -> (u32, u32, Vec<u8>) {
+    for _ in 0..120 {
+        if let Some(frame) = h.state().view3d.shown.as_ref()
+            && previous.is_none_or(|pixels| frame.2.as_slice() != pixels)
+        {
+            return frame.clone();
+        }
+
+        settle(h, 1);
+    }
+
+    panic!("3D view did not render an updated frame");
+}
+
 fn save(h: &mut Harness<'static, MaterialCraftApp>, dir: &std::path::Path, name: &str) {
     let img = h.render().expect("render");
     img.save(dir.join(format!("{name}.png"))).expect("save");
@@ -154,7 +168,7 @@ fn explorer_drags_a_linked_graph_between_open_packages() {
     assert_eq!(harness.state().session.document_id, target_document);
     assert_eq!(harness.state().session.history(), ["Add graph instance"]);
     let value = harness.state().session.cooked.image(instance, 0).unwrap().get(0, 0, false);
-    assert!(value.into_iter().zip([0.9, 0.3, 0.1, 1.0]).all(|(actual, expected)| (actual - expected).abs() < 1e-6));
+    assert!(value.into_iter().zip([0.9, 0.3, 0.1, 1.0]).all(|(actual, expected)| (actual - expected).abs() <= 1.0 / 255.0));
     assert!(harness.state().session.modified);
     save(&mut harness, &directory, "linked-instance-source-edit");
     let position = harness.get(By::new().role(egui::accesskit::Role::Button).label("Reusable tint")).rect().center();
@@ -588,7 +602,14 @@ fn output_menu_and_package_warnings_follow_parameter_types() {
     settle(&mut harness, 3);
     assert!(harness.query(By::new().label("Expected output: Float")).is_some());
     assert!(harness.query(By::new().label(&package_warning_label)).is_some());
-    harness.get(By::new().role(egui::accesskit::Role::Button).label("Float3")).click_secondary();
+    let node = harness.get(By::new().role(egui::accesskit::Role::Button).label("Float3")).rect();
+    let header = egui::pos2(node.center().x, node.min.y + 12.0);
+    harness.event(egui::Event::PointerMoved(header));
+    harness.step();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton { pos: header, button: egui::PointerButton::Secondary, pressed, modifiers: egui::Modifiers::NONE });
+        harness.step();
+    }
     settle(&mut harness, 3);
     assert!(harness.get(By::new().role(egui::accesskit::Role::Button).label("Set as output node")).accesskit_node().is_disabled());
     let directory = std::path::PathBuf::from(std::env::var_os("MC_SNAPSHOT_DIR").unwrap());
@@ -1452,9 +1473,8 @@ fn material_assignment_previews_outputs_and_survives_function_editing() {
         .as_u64()
         .unwrap();
     let mut harness = harness(app, 1600.0, 960.0);
-    settle(&mut harness, 45);
+    let before = wait_for_3d_frame(&mut harness, None);
     assert!(harness.state().session.material_maps().is_empty());
-    let before = harness.state().view3d.shown.clone().unwrap();
     let directory = std::path::PathBuf::from(std::env::var_os("MC_SNAPSHOT_DIR").unwrap());
     std::fs::create_dir_all(&directory).unwrap();
     save(&mut harness, &directory, "material-unassigned");
@@ -1466,27 +1486,24 @@ fn material_assignment_previews_outputs_and_survives_function_editing() {
     settle(&mut harness, 3);
     save(&mut harness, &directory, "material-channel-menu");
     harness.get(By::new().role(egui::accesskit::Role::Button).label("Base color")).click();
-    settle(&mut harness, 45);
+    let red_frame = wait_for_3d_frame(&mut harness, Some(&before.2));
     assert_eq!(harness.state().session.selection, selection, "channel menu clicks must not reach the graph beneath them");
     assert_eq!(harness.state().session.material_maps()[0].0, "baseColor");
-    let red_frame = harness.state().view3d.shown.clone().unwrap();
-    assert_ne!(before.2, red_frame.2, "assignment must invalidate the rendered frame");
     let red_pixels = red_frame.2.chunks_exact(4).filter(|pixel| u16::from(pixel[0]) > u16::from(pixel[1]) + 30).count();
     assert!(red_pixels > 100, "the rendered mesh must show the assigned red image");
     save(&mut harness, &directory, "material-assigned-red");
 
     harness.state_mut().run("graph.node.param", json!({"id": source, "param": "color", "value": [0.02, 0.04, 0.8, 1.0]})).unwrap();
-    settle(&mut harness, 45);
-    let blue_frame = harness.state().view3d.shown.clone().unwrap();
+    let blue_frame = wait_for_3d_frame(&mut harness, Some(&red_frame.2));
     let blue_pixels = blue_frame.2.chunks_exact(4).filter(|pixel| u16::from(pixel[2]) > u16::from(pixel[0]) + 30).count();
     assert!(blue_pixels > 100, "edits must refresh the assigned material");
-    assert_ne!(red_frame.2, blue_frame.2);
     save(&mut harness, &directory, "material-assigned-blue");
 
     harness.state_mut().run("file.new", json!({"kind": "function", "name": "Function preview"})).unwrap();
     settle(&mut harness, 45);
     let maps = harness.state().session.material_maps();
-    assert_eq!(maps[0].1.get(0, 0, false), [0.02, 0.04, 0.8, 1.0]);
+    let color = maps[0].1.get(0, 0, false);
+    assert!(color.into_iter().zip([0.02, 0.04, 0.8, 1.0]).all(|(actual, expected)| (actual - expected).abs() <= 1.0 / 255.0));
     assert_eq!(harness.state().session.material_preview.channels[&materialcraft_engine::core::MaterialChannel::BaseColor].node, NodeId(output));
     save(&mut harness, &directory, "material-retained-in-function");
 }

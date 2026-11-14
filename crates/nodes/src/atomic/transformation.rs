@@ -17,8 +17,7 @@ pub(super) fn definition() -> NodeDefinition {
 }
 
 fn transformation(context: &CookContext) -> CookResult {
-    // Transform the original texels. Resizing first would apply bilinear filtering
-    // even when nearest sampling is selected and would blur enlarged noise cells.
+    // Preserve source texels so nearest sampling does not blur the input
     let input = context.input(0).cloned().unwrap_or_else(|| Image::filled(context.w, context.h, Kind::Gray, [0.0; 4]));
     let offset = context.v2("offset");
     let matrix = context.v4("matrix");
@@ -30,14 +29,15 @@ fn transformation(context: &CookContext) -> CookResult {
     let nearest = context.i("filtering") == 1;
     let input = if nearest { nearest_mip(input, matrix, context) } else { input };
     let matte = context.v4("matte");
-    // A panoramic image wraps horizontally while keeping its vertical matte.
-    // Reducing both axis flags to `context.tile` discards valid wrapped texels.
+
+    // Keep independent wrap axes for panoramic images
     let tiling = context.vars.get("$tiling").and_then(materialcraft_core::Value::as_i32).map_or([context.tile; 2], |mask| [mask & 1 != 0, mask & 2 != 0]);
+
     Ok(vec![Image::generate_uv(context.w, context.h, input.kind, |u, v| {
         let x = u - 0.5;
         let y = v - 0.5;
-        // SBS stores the two matrix columns consecutively. Treating them as rows
-        // reverses rotations and applies a shear along the wrong axis.
+
+        // SBS stores matrix columns consecutively; interpreting rows reverses rotations
         let source_u = matrix[0] * x + matrix[2] * y + 0.5 + offset[0];
         let source_v = matrix[1] * x + matrix[3] * y + 0.5 + offset[1];
         if (!tiling[0] && !(0.0..1.0).contains(&source_u)) || (!tiling[1] && !(0.0..1.0).contains(&source_v)) {
@@ -55,19 +55,22 @@ fn nearest_mip(mut input: Image, matrix: [f32; 4], context: &CookContext) -> Ima
     let height = context.h.max(1) as f32;
     let dx = (matrix[0] * input.w as f32 / width).hypot(matrix[1] * input.h as f32 / width);
     let dy = (matrix[2] * input.w as f32 / height).hypot(matrix[3] * input.h as f32 / height);
+
+    // Thirteen reductions cover the maximum supported side of 8192 texels
     let levels = dx.max(dy).max(1.0).log2().round().clamp(0.0, 13.0) as u32;
     let maximum = match context.format {
         OutputFormat::U8 => Some(255.0),
         OutputFormat::Inherit | OutputFormat::U16 => Some(65535.0),
         OutputFormat::F16 | OutputFormat::F32 => None,
     };
+
     for _ in 0..levels {
         if input.w <= 1 && input.h <= 1 {
             break;
         }
-        // Nearest selects a texel within a mip level, not within the full-size
-        // image. Integer mip levels average four texels with halfway-up rounding.
-        input = Image::generate((input.w / 2).max(1), (input.h / 2).max(1), input.kind, |x, y| {
+
+        // Integer mip levels round four-texel averages halfway up
+        input = Image::generate(input.w.div_ceil(2), input.h.div_ceil(2), input.kind, |x, y| {
             let (x, y) = (i64::from(x) * 2, i64::from(y) * 2);
             let pixels = [input.get(x, y, false), input.get(x + 1, y, false), input.get(x, y + 1, false), input.get(x + 1, y + 1, false)];
             std::array::from_fn(|channel| {
@@ -80,5 +83,6 @@ fn nearest_mip(mut input: Image, matrix: [f32; 4], context: &CookContext) -> Ima
             })
         });
     }
+
     input
 }

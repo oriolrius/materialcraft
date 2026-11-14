@@ -214,6 +214,7 @@ fn processors_sample_dynamic_image_inputs_after_sbs_round_trip() {
 
     for definition in ["pixel_processor", "value_processor"] {
         let mut session = new_session();
+        session.graph_mut().unwrap().format = materialcraft_engine::core::OutputFormat::F32;
         session.preview_size = Some(16);
         let source = add(&mut session, "uniform");
         let processor = add(&mut session, definition);

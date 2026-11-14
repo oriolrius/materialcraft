@@ -123,7 +123,9 @@ fn read_embedded(relative: &str) -> Result<Vec<u8>, String> {
 }
 
 /// Bounds for scanning the library folder: how deep, and how many packages
+#[cfg(not(target_arch = "wasm32"))]
 const MAX_DEPTH: usize = 6;
+#[cfg(not(target_arch = "wasm32"))]
 const MAX_FILES: usize = 2048;
 
 /// Every SBS package in the library as `sbs://` paths, sorted: the files under the asset folder

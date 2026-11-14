@@ -1,6 +1,6 @@
 use materialcraft_engine::{
     MaterialPreview, MaterialSource, Session,
-    core::{Graph, MaterialChannel, NodeId, Package, Value},
+    core::{Graph, MaterialChannel, NodeId, OutputFormat, Package, Value},
     execute, new_session,
 };
 use serde_json::json;
@@ -10,6 +10,7 @@ fn add(session: &mut Session, definition: &str, params: serde_json::Value) -> No
 }
 
 fn source(session: &mut Session, color: [f32; 4]) -> NodeId {
+    session.graph_mut().unwrap().format = OutputFormat::F32;
     add(session, "uniform", json!({"color_mode": true, "color": color}))
 }
 
@@ -175,6 +176,7 @@ fn multiple_graph_channels_and_multi_output_instances_use_the_correct_ports() {
     let mut package = Package::new("Test");
     let mut graph = Graph::new("Colors");
     graph.size = [4, 4];
+    graph.format = OutputFormat::F32;
     for (name, color) in [("red", [0.8, 0.1, 0.1, 1.0]), ("blue", [0.1, 0.1, 0.8, 1.0])] {
         let image = graph.add_node("uniform", [0.0; 2]);
         graph.node_mut(image).unwrap().params.insert("color".into(), Value::Color(color));
@@ -183,7 +185,9 @@ fn multiple_graph_channels_and_multi_output_instances_use_the_correct_ports() {
         graph.connect(image, "output", output, "input").unwrap();
     }
     package.graphs.push(graph);
-    package.graphs.push(Graph::new("Instances"));
+    let mut instance_graph = Graph::new("Instances");
+    instance_graph.format = OutputFormat::F32;
+    package.graphs.push(instance_graph);
     let mut session = Session::new(package);
     execute(&mut session, "graph.open", &json!({"graph": 1})).unwrap();
     let instance = instance(&mut session, "Colors");

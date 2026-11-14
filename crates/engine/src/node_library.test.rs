@@ -143,6 +143,31 @@ fn the_whole_bundled_library_is_categorized() {
     }
 }
 
+#[test]
+fn bundled_material_functions_have_compatible_inputs() {
+    let library = NodeLibrary::load(&library::files());
+
+    for (package_name, graph_names) in [
+        ("sbs://3d_functions.sbs", &["3d_sdf_primitives/3d_sdf_plane"][..]),
+        (
+            "sbs://pbr_render2.sbs",
+            &["ibl_specular_contrib_anisotropic/IBLSpecularContribution", "ibl_specular_contrib_anisotropic/IBLSpecularContribution_iteration"],
+        ),
+    ] {
+        let package = &library.packages[package_name];
+        for graph_name in graph_names {
+            let (_, graph) = package.graph_by_name(graph_name).unwrap();
+            let mut function = graph.function.as_ref().unwrap().clone();
+
+            materialcraft_nodes::function::resolve_instances(&mut function, package, &library.packages);
+
+            if let Err(error) = materialcraft_nodes::function::compile(&function, 0) {
+                panic!("{package_name}#{graph_name}: {error}");
+            }
+        }
+    }
+}
+
 /// Identifier labels preserve recognized acronyms and omit empty words.
 #[test]
 fn identifiers_read_as_labels() {

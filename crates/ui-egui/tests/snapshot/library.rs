@@ -73,12 +73,12 @@ fn library_tree_shows_every_category_and_adds_what_the_graph_takes() {
     assert_eq!(graph.nodes.len(), before + 1);
     assert_eq!(graph.nodes.last().unwrap().def, "blur");
 
-    // Categories MaterialCraft has no nodes for yet say so
+    // The bundled library fills the noise category
     harness.get(tree("Texture generators")).click();
     settle(&mut harness, 3);
     harness.get(tree("Noises")).click();
     settle(&mut harness, 4);
-    assert!(harness.query(By::new().label("Nothing in this category yet")).is_some());
+    assert!(harness.query(tile("Perlin noise")).is_some());
     harness.get(tree("Texture generators")).click();
     settle(&mut harness, 2);
     harness.get(tree("Texture generators")).click();

@@ -40,14 +40,19 @@ pub(super) fn read_base_params(params: Option<XmlNode>, warnings: &mut Warnings)
     base
 }
 
-pub(super) fn base_params_xml(base: &BaseParameters, writer: &mut SbsWriter) -> Result<String, String> {
+pub(super) fn base_params_xml(base: &BaseParameters, writer: &mut SbsWriter, include_default_format: bool) -> Result<String, String> {
     let mut output = String::new();
     let defaults = BaseParameters::default();
+
     for parameter in BaseParameter::ALL {
         let function = base.functions.get(&parameter);
         let value = parameter.value(base);
         let inheritance = parameter.inheritance(base);
-        if function.is_none() && value == parameter.value(&defaults) && inheritance == parameter.inheritance(&defaults) {
+        if function.is_none()
+            && value == parameter.value(&defaults)
+            && inheritance == parameter.inheritance(&defaults)
+            && !(include_default_format && parameter == BaseParameter::Format)
+        {
             continue;
         }
 

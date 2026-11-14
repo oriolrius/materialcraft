@@ -152,7 +152,7 @@ impl SbsWriter {
             tiling_mode: graph.tiling_mode,
             ..Default::default()
         };
-        out.push_str(&super::base_parameters::base_params_xml(&base, self).map_err(FormatError::Io)?);
+        out.push_str(&super::base_parameters::base_params_xml(&base, self, false).map_err(FormatError::Io)?);
         out.push_str("</baseParameters>");
 
         write_canvas_items(out, graph, self);
@@ -237,6 +237,7 @@ impl SbsWriter {
         out.push_str("</graphOutputs>");
         output_uids
     }
+
     pub(super) fn write_implementation(
         &mut self,
         out: &mut String,
@@ -245,7 +246,8 @@ impl SbsWriter {
         ids: NodeIdentifiers,
         package: &Package,
     ) -> Result<()> {
-        let base = base_params_xml(&node.base, self).map_err(FormatError::Io)?;
+        // The reader assigns a native default when a processor omits format
+        let base = base_params_xml(&node.base, self, node.def == "pixel_processor").map_err(FormatError::Io)?;
 
         match node.def.as_str() {
             "output" => {
@@ -297,6 +299,7 @@ impl SbsWriter {
                 if package.is_empty() {
                     return Err(FormatError::Io(format!("missing package reference for `{name}`")));
                 }
+
                 let dependency = self.external_package_uid(&package);
                 let path = text_param(node, "sbs_path", &name);
                 let _ = write!(out, "<compInstance><path v=\"pkg:///{}?dependency={dependency}\"/>{raw_params}", xml_escape(&path));
@@ -325,6 +328,7 @@ impl SbsWriter {
                             );
                             continue;
                         }
+
                         if filter.sbs == "text"
                             && *sbs_name == "fontdata"
                             && let Value::Text(name) = value
@@ -351,6 +355,7 @@ impl SbsWriter {
                 _ => return Err(FormatError::Io(format!("`{def}` has no native primitive mapping; its SBS graph is required"))),
             },
         }
+
         Ok(())
     }
 }

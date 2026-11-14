@@ -624,6 +624,7 @@ fn library_samplers_read_image_inputs_in_both_processors() {
     for definition in ["pixel_processor", "value_processor"] {
         for sampler in ["samplelum", "samplecol"] {
             let mut session = new_session();
+            session.graph_mut().unwrap().format = materialcraft_engine::core::OutputFormat::F32;
             session.preview_size = Some(16);
             let color = [0.25, 0.5, 0.75, 1.0];
             let image = NodeId(

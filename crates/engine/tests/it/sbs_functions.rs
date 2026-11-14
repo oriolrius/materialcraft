@@ -26,6 +26,7 @@ fn imported_expression_cooks_follows_inputs_and_survives_undo_and_save() {
     let mut s = new_session();
     s.preview_size = Some(64);
     s.pkg = imported.pkg;
+    s.pkg.graphs[0].format = materialcraft_engine::core::OutputFormat::F32;
     let levels = s.graph().unwrap().nodes[0].id;
     let uniform = execute(&mut s, "graph.node.add", &json!({"def": "uniform", "params": {"color_mode": false}})).unwrap()["id"].as_u64().unwrap();
     execute(&mut s, "graph.connect", &json!({"from": uniform, "to": levels.0})).unwrap();

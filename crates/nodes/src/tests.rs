@@ -23,6 +23,32 @@ fn cook(def: &NodeDefinition, inputs: &[Option<Image>], size: u32) -> CookResult
     (def.cook)(&ctx)
 }
 
+#[test]
+fn nearest_transform_mip_keeps_the_last_column_of_an_odd_width_input() {
+    let definition = find("transformation").unwrap();
+    let mut params = resolve_params(definition, &BTreeMap::new());
+    params.insert("filtering".into(), Value::Enum(1));
+    let inputs = [Some(Image::gray(3, 1, |x, _| if x == 2 { 1.0 } else { 0.0 }))];
+    let vars = BTreeMap::new();
+    let resource = |_: &str| None;
+    let context = CookContext {
+        format: materialcraft_core::OutputFormat::F32,
+        w: 2,
+        h: 2,
+        seed: 0,
+        tile: false,
+        inputs: &inputs,
+        params: &params,
+        resource: &resource,
+        vars: &vars,
+    };
+
+    let output = (definition.cook)(&context).unwrap();
+
+    assert_eq!(output[0].get(0, 0, false)[0], 0.0);
+    assert_eq!(output[0].get(1, 0, false)[0], 1.0);
+}
+
 /// Image nodes cook finite outputs at the requested size; an empty processor reports its missing result
 #[test]
 fn every_node_cooks() {

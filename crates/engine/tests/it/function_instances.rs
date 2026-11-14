@@ -86,7 +86,7 @@ fn function_expansion_allows_several_bounded_bodies_but_still_caps_total_work() 
     let mut allowed = caller(3);
     function::resolve_instances(&mut allowed, &package, &BTreeMap::new());
     assert_eq!(evaluate(&allowed), Value::Float(3.0));
-    let mut oversized = caller(32);
+    let mut oversized = caller(64);
     function::resolve_instances(&mut oversized, &package, &BTreeMap::new());
     assert!(function::compile(&oversized, 0).err().unwrap().contains("limit"));
     // Compiling a pre-resolved tree must enforce its own budget too.
@@ -185,7 +185,9 @@ fn processor_calls_recook_when_source_changes_and_round_trip_without_copying_sou
     let target_path = directory.join("target.sbs");
     execute(&mut session, "file.saveAs", &json!({"path": source_path})).unwrap();
     let mut target_package = Package::new("Processors");
-    target_package.graphs.push(Graph::new("Processors"));
+    let mut processor_graph = Graph::new("Processors");
+    processor_graph.format = materialcraft_engine::core::OutputFormat::F32;
+    target_package.graphs.push(processor_graph);
     file_cmds::open_bytes(&mut session, &formats::sbs::write_sbs(&target_package).unwrap(), Some(target_path.to_string_lossy().into())).unwrap();
     let document = session.document_id;
     let mut processors = Vec::new();

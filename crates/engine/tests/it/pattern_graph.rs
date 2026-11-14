@@ -53,6 +53,7 @@ fn dynamic_roughness_survives_native_saving_and_invalidates_the_cook_cache() {
     function.output = Some(function.add("get_float1", &[], Some(Value::Text("$time".into()))));
     let mut graph = Graph::new("Depth");
     graph.size = [4, 4];
+    graph.format = materialcraft_engine::core::OutputFormat::F32;
     let owner = graph.add_node("fx_map", [0.0; 2]);
     let node = graph.node_mut(owner).unwrap();
     node.params.insert("pattern".into(), Value::PatternGraph(Box::new(pattern)));

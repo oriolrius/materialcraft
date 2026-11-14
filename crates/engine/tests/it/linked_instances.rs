@@ -1,6 +1,6 @@
 use materialcraft_engine::{
     Session,
-    core::{Graph, NodeId, Package, Value},
+    core::{Graph, NodeId, OutputFormat, Package, Value},
     execute, file_cmds, formats,
 };
 use serde_json::json;
@@ -9,6 +9,7 @@ fn source() -> (Package, NodeId) {
     let mut package = Package::new("Source file");
     let mut graph = Graph::new("Source");
     graph.size = [4, 4];
+    graph.format = OutputFormat::F32;
     let value = graph.add_node("uniform", [0.0; 2]);
     graph.node_mut(value).unwrap().params.insert("color".into(), Value::Color([0.25, 0.5, 0.75, 1.0]));
     let output = graph.add_node("output", [200.0, 0.0]);
@@ -16,6 +17,12 @@ fn source() -> (Package, NodeId) {
     graph.connect(value, "output", output, "input").unwrap();
     package.graphs.push(graph);
     (package, value)
+}
+
+fn float_graph(name: &str) -> Graph {
+    let mut graph = Graph::new(name);
+    graph.format = OutputFormat::F32;
+    graph
 }
 
 fn open(session: &mut Session, package: &Package, file: &str) -> u64 {
@@ -30,7 +37,7 @@ fn source_edits_update_instances_and_dirty_dependents_before_saving() {
     session.selection = vec![value];
     session.path = Some(std::env::temp_dir().join("materialcraft-instance-source.sbs").to_string_lossy().into_owned());
     let mut target = Package::new("Target file");
-    target.graphs.push(Graph::new("Target"));
+    target.graphs.push(float_graph("Target"));
     let target_id = open(&mut session, &target, "target.sbs");
     let instance = NodeId(execute(&mut session, "graph.instance.add", &json!({"document": 0, "graph": "Source"})).unwrap()["id"].as_u64().unwrap());
     session.preview_size = Some(16);
@@ -77,7 +84,7 @@ fn failed_edit_groups_do_not_publish_source_changes() {
     session.selection = vec![value];
     session.path = Some(std::env::temp_dir().join("materialcraft-group-source.sbs").to_string_lossy().into_owned());
     let mut target = Package::new("Target");
-    target.graphs.push(Graph::new("Target"));
+    target.graphs.push(float_graph("Target"));
     let target_id = open(&mut session, &target, "group-target.sbs");
     let instance = NodeId(execute(&mut session, "graph.instance.add", &json!({"document": 0, "graph": "Source"})).unwrap()["id"].as_u64().unwrap());
     session.modified = false;
@@ -123,7 +130,7 @@ fn updates_propagate_through_three_packages_and_cycles_are_rejected() {
     session.selection = vec![value];
     session.path = Some(std::env::temp_dir().join("materialcraft-transitive-source.sbs").to_string_lossy().into_owned());
     let mut target = Package::new("Target");
-    target.graphs.push(Graph::new("Target"));
+    target.graphs.push(float_graph("Target"));
     let middle = open(&mut session, &target, "transitive-middle.sbs");
     let instance = execute(&mut session, "graph.instance.add", &json!({"document": 0, "graph": "Source"})).unwrap()["id"].as_u64().unwrap();
     let output = execute(&mut session, "graph.node.add", &json!({"def": "output"})).unwrap()["id"].as_u64().unwrap();
@@ -156,7 +163,7 @@ fn closing_a_modified_source_discards_its_unsaved_changes_in_dependents() {
     session.selection = vec![value];
     execute(&mut session, "file.save", &json!({"path": source_path})).unwrap();
     let mut target = Package::new("Target");
-    target.graphs.push(Graph::new("Target"));
+    target.graphs.push(float_graph("Target"));
     let target_id = open(&mut session, &target, "discard-target.sbs");
     let instance = NodeId(execute(&mut session, "graph.instance.add", &json!({"document": 0, "graph": "Source"})).unwrap()["id"].as_u64().unwrap());
     execute(&mut session, "package.activate", &json!({"document": 0})).unwrap();
@@ -184,7 +191,7 @@ fn named_value_inputs_and_outputs_keep_their_type_across_files() {
     let mut session = Session::new(source);
     session.path = Some(std::env::temp_dir().join("materialcraft-value-source.sbs").to_string_lossy().into_owned());
     let mut target = Package::new("Target");
-    target.graphs.push(Graph::new("Target"));
+    target.graphs.push(float_graph("Target"));
     open(&mut session, &target, "value-target.sbs");
     let instance = NodeId(execute(&mut session, "graph.instance.add", &json!({"document": 0, "graph": "Source"})).unwrap()["id"].as_u64().unwrap());
     let value = execute(&mut session, "graph.node.add", &json!({"def": "input_value", "params": {"default": 0.75}})).unwrap()["id"].as_u64().unwrap();
@@ -219,7 +226,7 @@ fn removing_a_source_output_does_not_erase_connected_instance_wires_on_save() {
     session.path = Some(std::env::temp_dir().join("materialcraft-port-source.sbs").to_string_lossy().into_owned());
     let source_output = session.graph().unwrap().nodes.iter().find(|node| node.def == "output").unwrap().id;
     let mut target = Package::new("Target");
-    target.graphs.push(Graph::new("Target"));
+    target.graphs.push(float_graph("Target"));
     let target_id = open(&mut session, &target, "port-target.sbs");
     let instance = NodeId(execute(&mut session, "graph.instance.add", &json!({"document": 0, "graph": "Source"})).unwrap()["id"].as_u64().unwrap());
     let output = execute(&mut session, "graph.node.add", &json!({"def": "output"})).unwrap()["id"].as_u64().unwrap();
@@ -272,6 +279,7 @@ fn saved_dependencies_reopen_without_source_files_in_explorer_and_missing_source
     execute(&mut session, "file.save", &json!({"path": source_path})).unwrap();
     execute(&mut session, "file.newPackage", &json!({"name": "Target"})).unwrap();
     execute(&mut session, "file.new", &json!({"name": "Target", "template": "empty"})).unwrap();
+    session.graph_mut().unwrap().format = OutputFormat::F32;
     let instance = execute(&mut session, "graph.instance.add", &json!({"document": 0, "graph": "Source"})).unwrap()["id"].as_u64().unwrap();
     let output = execute(&mut session, "graph.node.add", &json!({"def": "output"})).unwrap()["id"].as_u64().unwrap();
     execute(&mut session, "graph.connect", &json!({"from": instance, "fromPort": "color", "to": output})).unwrap();
@@ -323,10 +331,11 @@ fn instance_defaults_follow_current_source_inputs_before_and_after_save() {
         execute(&mut session, "graph.exposed.set", &json!({"id": "tint", "value": [0.2, 0.3, 0.4, 1.0]})).unwrap();
         let target_document = if linked {
             let mut target = Package::new("Target");
-            target.graphs.push(Graph::new("Target"));
+            target.graphs.push(float_graph("Target"));
             open(&mut session, &target, target_path.to_str().unwrap())
         } else {
             execute(&mut session, "file.new", &json!({"name": "Target", "template": "empty"})).unwrap();
+            session.graph_mut().unwrap().format = OutputFormat::F32;
             session.document_id
         };
         let target_graph = session.graph;
