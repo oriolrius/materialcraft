@@ -140,7 +140,9 @@ fn dds_handles_partial_blocks_signed_hdr_swizzles_and_allocation_caps() {
     dds::header::Header::new_image(1, 1, dds::Format::R8G8B8A8_SNORM).write(&mut snorm).unwrap();
     snorm.extend_from_slice(&[(-64i8) as u8, 64, (-127i8) as u8, 127]);
     let snorm_img = decode(&snorm, true).unwrap();
-    assert!(snorm_img.data()[0] < 0.0 && snorm_img.data()[1] > 0.0);
+    for (actual, expected) in snorm_img.data().iter().zip([63.0 / 254.0, 191.0 / 254.0, 0.0, 1.0]) {
+        assert!((actual - expected).abs() < 1e-4, "actual={actual}, expected={expected}");
+    }
 
     for format in [dds::Format::BC4_SNORM, dds::Format::BC5_SNORM] {
         let mut bytes = Vec::new();
