@@ -146,7 +146,7 @@ fn dds_handles_partial_blocks_signed_hdr_swizzles_and_allocation_caps() {
         let mut bytes = Vec::new();
         let header = dds::header::Header::new_image(4, 4, format);
         let mut encoder = dds::Encoder::new(&mut bytes, format, &header).unwrap();
-        let pixels = [0.5_f32, -0.5, 0.0, 1.0].repeat(16);
+        let pixels: Vec<u8> = [0.5_f32, -0.5, 0.0, 1.0].into_iter().flat_map(f32::to_le_bytes).collect::<Vec<u8>>().repeat(16);
         encoder.write_surface(dds::ImageView::new(&pixels, dds::Size::new(4, 4), dds::ColorFormat::RGBA_F32).unwrap()).unwrap();
         encoder.finish().unwrap();
         let image = decode(&bytes, true).unwrap();
