@@ -94,3 +94,80 @@ fn shared_dds_keeps_rgb_transfer_alpha_and_float_range() {
         assert_eq!(decode(&floats, linear).unwrap().data(), &[-0.5, 2.0, 0.25, 0.75]);
     }
 }
+
+#[test]
+fn dds_handles_partial_blocks_signed_hdr_swizzles_and_allocation_caps() {
+    // Partial (non-4x4-aligned) blocks crop cleanly to the declared dimensions.
+    for format in [dds::Format::BC1_UNORM, dds::Format::BC3_UNORM, dds::Format::BC5_UNORM, dds::Format::BC7_UNORM] {
+        let mut bytes = Vec::new();
+        let header = dds::header::Header::new_image(5, 3, format);
+        let mut encoder = dds::Encoder::new(&mut bytes, format, &header).unwrap();
+        let pixels = [64, 128, 192, 255].repeat(5 * 3);
+        encoder.write_surface(dds::ImageView::new(&pixels, dds::Size::new(5, 3), dds::ColorFormat::RGBA_U8).unwrap()).unwrap();
+        encoder.finish().unwrap();
+
+        let image = decode(&bytes, true).unwrap();
+        assert_eq!((image.width(), image.height()), (5, 3), "{format:?}");
+        assert_eq!(image.data().len(), 5 * 3 * 4, "{format:?}");
+        assert!(image.data().iter().all(|value| value.is_finite()), "{format:?}");
+        assert!(decode(&bytes[..bytes.len() - 1], true).is_err(), "{format:?} truncated partial block");
+    }
+
+    // Swizzled BGRA8 maps channels to RGBA and applies sRGB->linear when `linear` is false.
+    let mut bgra = Vec::new();
+    dds::header::Header::new_image(1, 1, dds::Format::B8G8R8A8_UNORM).write(&mut bgra).unwrap();
+    bgra.extend_from_slice(&[192, 128, 64, 32]);
+    let bgra_raw = decode(&bgra, true).unwrap();
+    for (actual, expected) in bgra_raw.data().iter().zip([64.0 / 255.0, 128.0 / 255.0, 192.0 / 255.0, 32.0 / 255.0]) {
+        assert!((actual - expected).abs() < 1e-6);
+    }
+    let bgra_linear = decode(&bgra, false).unwrap();
+    for i in 0..3 {
+        assert!((bgra_linear.data()[i] - craft_texture::srgb_to_linear(bgra_raw.data()[i])).abs() < 1e-6);
+    }
+    assert_eq!(bgra_linear.data()[3], bgra_raw.data()[3]);
+
+    // Half-float HDR and negative values survive when decoded linearly.
+    let mut half_hdr = Vec::new();
+    dds::header::Header::new_image(1, 1, dds::Format::R16G16B16A16_FLOAT).write(&mut half_hdr).unwrap();
+    for bits in [0xb800u16, 0x4000, 0x3400, 0x3a00] {
+        half_hdr.extend_from_slice(&bits.to_le_bytes());
+    }
+    assert_eq!(decode(&half_hdr, true).unwrap().data(), &[-0.5, 2.0, 0.25, 0.75]);
+
+    // Signed uncompressed, signed BC4/BC5, and unsigned/signed BC6H decode to finite values.
+    let mut snorm = Vec::new();
+    dds::header::Header::new_image(1, 1, dds::Format::R8G8B8A8_SNORM).write(&mut snorm).unwrap();
+    snorm.extend_from_slice(&[(-64i8) as u8, 64, (-127i8) as u8, 127]);
+    let snorm_img = decode(&snorm, true).unwrap();
+    assert!(snorm_img.data()[0] < 0.0 && snorm_img.data()[1] > 0.0);
+
+    for format in [dds::Format::BC4_SNORM, dds::Format::BC5_SNORM] {
+        let mut bytes = Vec::new();
+        let header = dds::header::Header::new_image(4, 4, format);
+        let mut encoder = dds::Encoder::new(&mut bytes, format, &header).unwrap();
+        let pixels = [0.5_f32, -0.5, 0.0, 1.0].repeat(16);
+        encoder.write_surface(dds::ImageView::new(&pixels, dds::Size::new(4, 4), dds::ColorFormat::RGBA_F32).unwrap()).unwrap();
+        encoder.finish().unwrap();
+        let image = decode(&bytes, true).unwrap();
+        assert_eq!((image.width(), image.height()), (4, 4), "{format:?}");
+        assert!(image.data().iter().all(|value| value.is_finite()), "{format:?}");
+    }
+
+    for format in [dds::Format::BC6H_UF16, dds::Format::BC6H_SF16] {
+        let mut bytes = Vec::new();
+        dds::header::Header::new_image(4, 4, format).write(&mut bytes).unwrap();
+        bytes.extend_from_slice(&[0u8; 16]);
+        let image = decode(&bytes, true).unwrap();
+        assert_eq!((image.width(), image.height()), (4, 4), "{format:?}");
+        assert!(image.data().iter().all(|value| value.is_finite()), "{format:?}");
+    }
+
+    // Oversized headers are rejected before allocating pixel buffers.
+    for (w, h) in [(craft_texture::MAX_SIDE + 1, 1), (1, craft_texture::MAX_SIDE + 1)] {
+        let mut oversized = Vec::new();
+        dds::header::Header::new_image(w, h, dds::Format::R8G8B8A8_UNORM).write(&mut oversized).unwrap();
+        let err = decode(&oversized, true).unwrap_err().to_string();
+        assert!(err.contains(&craft_texture::MAX_SIDE.to_string()), "unexpected error for {w}x{h}: {err}");
+    }
+}

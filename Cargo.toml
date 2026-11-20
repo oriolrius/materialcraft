@@ -112,7 +112,7 @@ craft-atomic = { git = "https://github.com/storytold/craft-libs", rev = "453b0da
 # Parse the optional shared font catalog at build time; the font repository is not a dependency
 craft-fonts-build = { git = "https://github.com/storytold/craft-libs", rev = "453b0da782ccef39be9a6dac8d27c80b553ef1cc" }
 # Float image planes and texture sampling for node cooking: storytold/craft-libs, MIT OR Apache-2.0
-craft-texture = { git = "https://github.com/storytold/craft-libs", rev = "453b0da782ccef39be9a6dac8d27c80b553ef1cc", features = ["parallel"] }
+craft-texture = { git = "https://github.com/storytold/craft-libs", rev = "5a913a42abc9fed0cfc588114788e400229f5108", features = ["parallel"] }
 
 # egui 0.37 and winit: the suite's forks (storytold/egui, storytold/winit), as craft-libs pins them.
 [patch.crates-io]

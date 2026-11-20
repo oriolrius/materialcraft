@@ -1055,7 +1055,7 @@ dependencies = [
 [[package]]
 name = "craft-texture"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs?rev=453b0da782ccef39be9a6dac8d27c80b553ef1cc#453b0da782ccef39be9a6dac8d27c80b553ef1cc"
+source = "git+https://github.com/storytold/craft-libs?rev=5a913a42abc9fed0cfc588114788e400229f5108#5a913a42abc9fed0cfc588114788e400229f5108"
 dependencies = [
  "bytemuck",
  "dds",
